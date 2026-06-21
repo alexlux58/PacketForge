@@ -86,3 +86,32 @@ def test_unusual_ttl_contributes_no_vote() -> None:
     evidence = score_fingerprint(FingerprintObservations(host="h", ttl=300))
     # 300 is out of range -> no confident initial TTL
     assert evidence.confidence == 0.0
+
+
+def test_insufficient_evidence_still_reports_attempts() -> None:
+    # Unprivileged, no banners, but ports were probed: the evidence table must not
+    # be blank — it should list every attempt plus a privilege note.
+    obs = FingerprintObservations(
+        host="192.168.4.1",
+        raw_signals_available=False,
+        connect_results={22: "connection refused", 80: "open (no banner)"},
+    )
+    evidence = score_fingerprint(obs)
+    assert evidence.summary == "insufficient evidence"
+    names = {s.name for s in evidence.signals}
+    assert {"TCP 22", "TCP 80", "Privilege"} <= names
+    refused = next(s for s in evidence.signals if s.name == "TCP 22")
+    assert "refused" in refused.value
+    assert "closed" in refused.interpretation.lower()
+    privilege = next(s for s in evidence.signals if s.name == "Privilege")
+    assert "elevation" in privilege.interpretation.lower()
+    # Context rows must never sway the OS vote.
+    assert all(s.weight == 0.0 for s in evidence.signals)
+
+
+def test_privilege_note_absent_when_raw_available() -> None:
+    obs = FingerprintObservations(
+        host="h", raw_signals_available=True, connect_results={22: "open (banner)"}
+    )
+    evidence = score_fingerprint(obs)
+    assert not any(s.name == "Privilege" for s in evidence.signals)

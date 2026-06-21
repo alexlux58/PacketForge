@@ -151,8 +151,15 @@ class TopologyView(QGraphicsView):
         self.scale(factor, factor)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        item = self.itemAt(event.position().toPoint())
-        payload = self._payloads.get(id(item)) if item is not None else None
+        # Node labels are drawn as separate text items stacked above the rects,
+        # so itemAt() alone would return a non-interactive label. Scan every item
+        # under the cursor (top to bottom) for the first one carrying a payload.
+        payload: TopologyNode | TopologyEdge | None = None
+        for item in self.items(event.position().toPoint()):
+            candidate = self._payloads.get(id(item))
+            if candidate is not None:
+                payload = candidate
+                break
         if isinstance(payload, TopologyNode) and payload.kind in {"host", "gateway"}:
             self.node_clicked.emit(payload)
         elif isinstance(payload, TopologyEdge):

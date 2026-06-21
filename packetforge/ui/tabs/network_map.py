@@ -14,8 +14,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from packetforge.engine.observability import build_topology
-from packetforge.models.observability import TopologyEdge, TopologyGraph, TopologyNode
+from packetforge.engine.observability import build_topology, detect_anomalies
+from packetforge.models.observability import (
+    AnomalyFinding,
+    TopologyEdge,
+    TopologyGraph,
+    TopologyNode,
+)
 from packetforge.ui.state import DiscoveryState
 from packetforge.ui.widgets.host_detail import HostDetailPanel
 from packetforge.ui.widgets.page_header import PageHeader
@@ -30,6 +35,7 @@ class NetworkMapTab(QWidget):
         super().__init__()
         self.state = state
         self.graph = TopologyGraph()
+        self._anomalies: list[AnomalyFinding] = []
 
         root = QVBoxLayout(self)
         root.addWidget(
@@ -98,7 +104,11 @@ class NetworkMapTab(QWidget):
 
     def rebuild(self) -> None:
         hosts = self.state.hosts()
-        self.graph = build_topology(hosts, group_by=self.group_by.currentText())
+        scan_targets = self.state.last_run.targets if self.state.last_run else None
+        self.graph = build_topology(
+            hosts, group_by=self.group_by.currentText(), scan_targets=scan_targets
+        )
+        self._anomalies = detect_anomalies(hosts)
         self.view.set_graph(self.graph)
         self.view.reset_view()
         if hosts:
@@ -133,7 +143,8 @@ class NetworkMapTab(QWidget):
 
     def _show_node(self, node: TopologyNode) -> None:
         host = self.state.get(node.ip or "")
-        self.host_detail.show_host(host)
+        findings = [a for a in self._anomalies if a.host == (node.ip or "")]
+        self.host_detail.show_host(host, anomalies=findings)
         self.edge_detail.setText("")
         if host is not None:
             self.status_message.emit(f"Map: inspecting {host.ip}")

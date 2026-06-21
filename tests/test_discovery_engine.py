@@ -229,6 +229,53 @@ def test_icmp_without_raw_sockets_is_skipped(monkeypatch: pytest.MonkeyPatch) ->
     assert any("raw sockets" in line.lower() for line in logs)
 
 
+def test_probe_exception_does_not_abort_scan(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A single target blowing up must not kill the whole run (the mid-scan
+    # "unexpected error" banner bug). Other hosts still get found and logged.
+    def flaky(ip: str, port: int, _timeout: float, *, grab_banner: bool):  # type: ignore[no-untyped-def]
+        if ip == "10.0.0.2":
+            raise RuntimeError("boom")
+        return ("open", None, 1.0) if port == 80 else ("closed", None, None)
+
+    monkeypatch.setattr(discovery, "_tcp_connect", flaky)
+    logs: list[str] = []
+    run = DiscoveryEngine().run(
+        DiscoveryConfig(
+            targets="10.0.0.1-10.0.0.3",
+            methods=["tcp"],
+            tcp_ports=[80],
+            profile_name="Lab Fast",
+            resolve_hostnames=False,
+            grab_banners=False,
+        ),
+        on_log=logs.append,
+    )
+    ips = {h.ip for h in run.hosts}
+    assert "10.0.0.1" in ips and "10.0.0.3" in ips
+    assert "10.0.0.2" not in ips  # the failing target is skipped, not fatal
+    assert any("Probe error on 10.0.0.2" in line for line in logs)
+
+
+def test_subnet_uses_scanned_cidr_not_24(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_tcp(_ip: str, port: int, _timeout: float, *, grab_banner: bool):  # type: ignore[no-untyped-def]
+        return ("open", None, 1.0) if port == 80 else ("closed", None, None)
+
+    monkeypatch.setattr(discovery, "_tcp_connect", fake_tcp)
+    run = DiscoveryEngine().run(
+        DiscoveryConfig(
+            targets="192.168.4.0/22",
+            methods=["tcp"],
+            tcp_ports=[80],
+            profile_name="Lab Fast",
+            resolve_hostnames=False,
+            grab_banners=False,
+            max_targets=3,  # cap expansion; the /22 grouping is what we assert
+        )
+    )
+    assert run.host_count == 3
+    assert {host.subnet for host in run.hosts} == {"192.168.4.0/22"}
+
+
 def test_stop_mid_scan_short_circuits_remaining_ports(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
     engine = DiscoveryEngine()

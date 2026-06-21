@@ -5,6 +5,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from packetforge.engine.statistics import calculate_ping_summary
+from packetforge.engine.subnets import (
+    IPNetwork,
+    containing_network,
+    parse_scan_networks,
+    subnet_for_ip,
+)
 from packetforge.engine.targets import parse_targets
 from packetforge.models.discovery import (
     DiscoveryRun,
@@ -351,14 +357,8 @@ def latency_summary(results: Sequence[PingResult]) -> LatencySummary:
 # ---------------------------------------------------------------------------
 
 
-def _subnet_of(ip: str) -> str:
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return "unknown"
-    if isinstance(addr, ipaddress.IPv4Address):
-        return str(ipaddress.ip_network(f"{ip}/24", strict=False))
-    return str(ipaddress.ip_network(f"{ip}/64", strict=False))
+def _subnet_of(ip: str, scan_networks: Sequence[IPNetwork] = ()) -> str:
+    return subnet_for_ip(ip, scan_networks) or "unknown"
 
 
 def _looks_like_gateway(host: HostRecord) -> bool:
@@ -382,17 +382,29 @@ def _node_badges(host: HostRecord) -> list[str]:
     return badges[:8]
 
 
-def _group_key(host: HostRecord, group_by: str) -> str:
+def _group_key(host: HostRecord, group_by: str, scan_networks: Sequence[IPNetwork] = ()) -> str:
     if group_by == "protocol":
         names = sorted({s.name for s in host.services if s.state == "open" and s.name})
         return names[0] if names else "no-service"
+    # Prefer the network the user actually scanned so a /22 scan is not mislabeled
+    # as /24. ``host.subnet`` already carries the scanned prefix for fresh runs;
+    # ``scan_networks`` re-derives it for hosts loaded without a subnet.
+    scoped = containing_network(host.ip, scan_networks)
+    if scoped is not None:
+        return str(scoped)
     return host.subnet or _subnet_of(host.ip)
 
 
-def build_topology(hosts: Sequence[HostRecord], group_by: str = "subnet") -> TopologyGraph:
+def build_topology(
+    hosts: Sequence[HostRecord],
+    group_by: str = "subnet",
+    *,
+    scan_targets: str | None = None,
+) -> TopologyGraph:
+    scan_networks = parse_scan_networks(scan_targets) if scan_targets else []
     grouped: dict[str, list[HostRecord]] = {}
     for host in hosts:
-        grouped.setdefault(_group_key(host, group_by), []).append(host)
+        grouped.setdefault(_group_key(host, group_by, scan_networks), []).append(host)
     groups = sorted(grouped)
     nodes: list[TopologyNode] = []
     edges: list[TopologyEdge] = []
@@ -1176,7 +1188,7 @@ def build_bundle(
         subnet_coverage=subnet_coverage(hosts),
         port_heatmap=port_heatmap(hosts),
         confidence_distribution=confidence_distribution(hosts),
-        topology=build_topology(hosts),
+        topology=build_topology(hosts, scan_targets=run.targets if run else None),
         protocol_panels=build_protocol_panels(probes),
         anomalies=anomalies,
     )

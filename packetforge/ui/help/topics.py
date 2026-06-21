@@ -65,9 +65,16 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         ),
         (
             "Methods",
-            "TCP connect works without root. ICMP, TCP SYN, ARP, and passive capture need "
-            "raw-socket privileges (sudo on macOS, capabilities on Linux). Disabled methods "
-            "show 'needs elevation'.",
+            "TCP connect, UDP, and DNS reverse work without root. ICMP, TCP SYN, and ARP need "
+            "raw-socket privileges (sudo on macOS, capabilities on Linux); when unavailable "
+            "they are greyed out and labelled 'needs elevation' before you start. The results "
+            "panel lists which methods are running and which are unavailable.",
+        ),
+        (
+            "Scan scope",
+            "The results panel shows the scope it is scanning, e.g. 'Scanning 192.168.4.0/22 "
+            "(1022 hosts)'. Subnet grouping in Network Map and Observability follows the CIDR "
+            "you scanned, so a /22 scan groups under /22 rather than being split into /24s.",
         ),
         (
             "Reading the table",
@@ -93,13 +100,29 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         "Collects TTL, TCP window, ICMP, and banner evidence to infer a likely OS family.",
         (
             "How to run",
-            "Pick a host from Discovery or enter an IP manually, choose an interface, then "
-            "Run fingerprint. Results appear in the evidence table.",
+            "The Host box pre-fills with a discovered host (or type any IP/hostname). If that "
+            "host already has open ports from Discovery, they are reused for banner probes. "
+            "Pick an interface, then Run fingerprint. Every port probed appears in the "
+            "evidence table.",
         ),
         (
             "Interpreting results",
             "PacketForge reports a likely OS family with a confidence score — never an exact OS "
-            "version. Low confidence means sparse or conflicting evidence.",
+            "version. Low confidence ('insufficient evidence') means sparse or conflicting "
+            "signals, which is normal for banner-only probing.",
+        ),
+        (
+            "Reading the evidence table",
+            "Signals carry a weight: banners (3.0) and TTL/window (1.5-2.0) drive the OS guess; "
+            "weight-0 rows are context, not votes. Negative results are shown too — e.g. "
+            "'TCP 22: connection refused' means the host is up but not serving SSH there.",
+        ),
+        (
+            "Unprivileged mode",
+            "Raw signals (initial TTL, TCP SYN options, ICMP echo) need elevation: sudo on "
+            "macOS, or 'setcap cap_net_raw+ep' on Linux. Without it, only TCP connect and "
+            "banner grabbing run, so confidence stays low and a 'Privilege' row explains why. "
+            "Elevate and re-run for a stronger result.",
         ),
     ),
     "network_map": _topic(
@@ -113,12 +136,14 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         ),
         (
             "Grouping",
-            "Subnet groups hosts by CIDR. Protocol groups by detected service/protocol badges.",
+            "Subnet groups hosts by the CIDR you actually scanned — a /22 scan groups under "
+            "/22, not /24. Protocol groups by detected service/protocol badges.",
         ),
         (
             "Inspecting",
-            "Click a node for host detail. Click an edge for evidence (ARP, passive capture, "
-            "latency, reverse DNS).",
+            "Click a node (anywhere on it, including its label) for host detail with any "
+            "anomalies. Click an edge for evidence (ARP, passive capture, latency, reverse "
+            "DNS).",
         ),
     ),
     "protocol_troubleshooter": _topic(
@@ -130,6 +155,22 @@ HELP_TOPICS: dict[str, HelpTopic] = {
             "DNS lookups, SNMP GET, SMTP banner, and NTP queries are safe read-only checks. "
             "Enable Lab mode (with confirmation) for zone transfers, DHCP discover, BGP OPEN, "
             "OSPF hello, and STP BPDU — only on lab networks you control.",
+        ),
+        (
+            "SNMP",
+            "Enter the device IP and the read-only community you are authorized to use "
+            "(commonly 'public'), then 'Read common OIDs' to fetch the system group. Choose "
+            "SNMPv2c (most devices) or SNMPv1 — both use the community; many v1-only agents "
+            "answer a v2c GET. The community/username fields enable based on the selected "
+            "version. SNMPv3 (user-based auth) is not implemented; use an external v3 tool. "
+            "PacketForge never guesses communities.",
+        ),
+        (
+            "SMTP",
+            "Enter the mail server IP/hostname and port (25 for MTAs, 587 for submission), "
+            "set an EHLO name (any valid hostname), and run the check. It reads the banner, "
+            "lists EHLO capabilities, and reports whether STARTTLS is advertised. This is "
+            "read-only inspection — no mail is sent.",
         ),
         (
             "Results",

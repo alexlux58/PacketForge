@@ -35,12 +35,14 @@ class DataTable(QWidget):
         empty_message: str = "No rows yet.",
         empty_hint: str = "",
         sortable: bool = True,
+        min_column_widths: dict[int, int] | None = None,
     ) -> None:
         super().__init__()
         self._columns = list(columns)
         self._filter_text = ""
         self._sortable = sortable
         self._bulk_depth = 0
+        self._min_column_widths = dict(min_column_widths or {})
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -72,12 +74,24 @@ class DataTable(QWidget):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
+        header.setMinimumSectionSize(60)
         self.table.itemDoubleClicked.connect(self._on_double_click)
         root.addWidget(self.table, 1)
 
         self.empty = EmptyStateWidget(empty_message, hint=empty_hint)
         root.addWidget(self.empty)
+        self._apply_min_column_widths()
         self._sync_empty_state()
+
+    def set_min_column_widths(self, widths: dict[int, int]) -> None:
+        """Set per-column minimum widths so key columns (IP/MAC/...) stay readable."""
+        self._min_column_widths.update(widths)
+        self._apply_min_column_widths()
+
+    def _apply_min_column_widths(self) -> None:
+        for column, width in self._min_column_widths.items():
+            if 0 <= column < self.table.columnCount() and self.table.columnWidth(column) < width:
+                self.table.setColumnWidth(column, width)
 
     def focus_search(self) -> None:
         self.search.setFocus()
@@ -104,6 +118,9 @@ class DataTable(QWidget):
         self.table.resizeColumnsToContents()
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
+        # resizeColumnsToContents() can shrink columns below a readable width
+        # (e.g. truncating IPs to "192.168..."); never go below the configured min.
+        self._apply_min_column_widths()
 
     def scroll_to_bottom(self) -> None:
         row_count = self.table.rowCount()
@@ -165,7 +182,10 @@ class DataTable(QWidget):
         return buffer.getvalue().rstrip("\n")
 
     def set_cell(self, row: int, column: int, value: str, *, user_data: str | None = None) -> None:
-        item = QTableWidgetItem(value)
+        item = _SortableItem(value)
+        if value:
+            # Full value on hover so a narrowed column never hides data (e.g. long IPs).
+            item.setToolTip(value)
         _apply_sort_key(item, value)
         if user_data is not None and column == 0:
             item.setData(Qt.ItemDataRole.UserRole, user_data)
@@ -225,18 +245,57 @@ class DataTable(QWidget):
 
 _NUMERIC_PREFIX = re.compile(r"^(-?\d+(?:\.\d+)?)")
 
+# A private role for the numeric sort key. Crucially this is NOT EditRole:
+# QTableWidgetItem treats DisplayRole and EditRole as the same data, so writing a
+# numeric EditRole used to overwrite the visible text (e.g. "22,80,8080" -> 22808080).
+_SORT_ROLE = Qt.ItemDataRole.UserRole + 1
 
-def _apply_sort_key(item: QTableWidgetItem, value: str) -> None:
+
+class _SortableItem(QTableWidgetItem):
+    """Table item that sorts on a numeric key when present, else falls back to text.
+
+    The key is a tuple of floats so multi-value cells (port lists like
+    "22,80,8080") sort element-by-element instead of being mangled into a single
+    concatenated integer.
+    """
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        own = self.data(_SORT_ROLE)
+        their = other.data(_SORT_ROLE) if isinstance(other, QTableWidgetItem) else None
+        if own is not None and their is not None:
+            return tuple(own) < tuple(their)
+        return super().__lt__(other)
+
+
+def _leading_number(text: str) -> float | None:
+    match = _NUMERIC_PREFIX.match(text.strip())
+    return float(match.group(1)) if match is not None else None
+
+
+def _numeric_sort_key(value: str) -> tuple[float, ...] | None:
+    """Numeric sort key for a cell, or None to sort as plain text.
+
+    A comma always denotes a multi-value list here (the app never renders
+    thousands separators), so each comma-separated part must be numeric for the
+    cell to sort numerically. This keeps "22,80,8080" sorting as (22, 80, 8080)
+    while leaving "icmp,tcp" to sort as text.
+    """
     stripped = value.strip()
     if not stripped:
-        return
-    if stripped.isdigit():
-        item.setData(Qt.ItemDataRole.EditRole, int(stripped))
-        return
-    match = _NUMERIC_PREFIX.match(stripped.replace(",", ""))
-    if match is not None:
-        text = match.group(1)
-        item.setData(
-            Qt.ItemDataRole.EditRole,
-            int(text) if "." not in text else float(text),
-        )
+        return None
+    if "," in stripped:
+        numbers: list[float] = []
+        for part in stripped.split(","):
+            number = _leading_number(part)
+            if number is None:
+                return None
+            numbers.append(number)
+        return tuple(numbers) if numbers else None
+    number = _leading_number(stripped)
+    return (number,) if number is not None else None
+
+
+def _apply_sort_key(item: QTableWidgetItem, value: str) -> None:
+    key = _numeric_sort_key(value)
+    if key is not None:
+        item.setData(_SORT_ROLE, key)

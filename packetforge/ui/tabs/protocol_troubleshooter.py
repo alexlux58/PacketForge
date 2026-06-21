@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -36,6 +37,7 @@ class ProtocolTroubleshooterTab(QWidget):
         super().__init__()
         self.workers: list[ProtocolWorker] = []
         self.obs_state = obs_state
+        self._busy_banner_shown = False
 
         root = QVBoxLayout(self)
         root.addWidget(
@@ -65,14 +67,17 @@ class ProtocolTroubleshooterTab(QWidget):
 
     # --- shared helpers -------------------------------------------------
 
-    def _output(self) -> QPlainTextEdit:
+    def _output(self, placeholder: str = "") -> QPlainTextEdit:
         view = QPlainTextEdit()
         view.setReadOnly(True)
         view.setFont(QFont("Menlo", 11))
+        if placeholder:
+            view.setPlaceholderText(placeholder)
         return view
 
     def _run(self, task: ProbeTask, output: QPlainTextEdit, button: QPushButton) -> None:
         if any(worker.isRunning() for worker in self.workers):
+            self._busy_banner_shown = True
             self.error_banner.show_event(
                 ErrorEvent(
                     severity="info",
@@ -133,6 +138,11 @@ class ProtocolTroubleshooterTab(QWidget):
     def _forget(self, worker: ProtocolWorker) -> None:
         if worker in self.workers:
             self.workers.remove(worker)
+        # Once nothing is running, dismiss the stale "probe already running"
+        # info banner so it does not linger while the panel is idle.
+        if self._busy_banner_shown and not any(w.isRunning() for w in self.workers):
+            self._busy_banner_shown = False
+            self.error_banner.clear()
 
     def _confirm(self, title: str, message: str) -> bool:
         reply = QMessageBox.warning(
@@ -298,39 +308,78 @@ class ProtocolTroubleshooterTab(QWidget):
         layout = QVBoxLayout(widget)
         form = QFormLayout()
         layout.addLayout(form)
-        host = QLineEdit("192.168.1.1")
+        host = QLineEdit("192.168.4.1")
+        host.setToolTip("Target device IP or hostname, e.g. 192.168.4.1")
         version = QComboBox()
-        version.addItems(["v2c", "v3"])
+        version.addItems(["v2c", "v1", "v3"])
+        version.setToolTip(
+            "SNMPv2c/v1 use a read-only community. SNMPv3 (user-based) is not "
+            "implemented in this build."
+        )
         community = QLineEdit()
         community.setEchoMode(QLineEdit.EchoMode.Password)
-        community.setPlaceholderText("read-only community (never guessed)")
+        community.setPlaceholderText("read-only community, e.g. public (never guessed)")
+        community.setToolTip(
+            "The read-only community string you are authorized to use. PacketForge "
+            "never guesses or brute-forces communities."
+        )
         username = QLineEdit()
-        username.setPlaceholderText("SNMPv3 username")
+        username.setPlaceholderText("SNMPv3 security name")
+        username.setToolTip("Only used for SNMPv3, which this build reports as unsupported.")
         timeout = self._spin(1, 30, 3)
         form.addRow("Host", host)
         form.addRow("Version", version)
-        form.addRow("Community", community)
-        form.addRow("v3 username", username)
+        community_label = QLabel("Community")
+        form.addRow(community_label, community)
+        username_label = QLabel("v3 username")
+        form.addRow(username_label, username)
         form.addRow("Timeout (s)", timeout)
 
-        output = self._output()
+        output = self._output(
+            "Enter the target IP and a read-only community (e.g. public), then "
+            "'Read common OIDs' to fetch the SNMPv2-MIB system group "
+            "(sysDescr, sysName, sysUpTime, ...). Read-only; nothing is written."
+        )
         run = QPushButton("Read common OIDs")
         layout.addWidget(run)
         layout.addWidget(output, 1)
 
+        def sync_fields() -> None:
+            is_v3 = version.currentText() == "v3"
+            community.setEnabled(not is_v3)
+            community_label.setEnabled(not is_v3)
+            username.setEnabled(is_v3)
+            username_label.setEnabled(is_v3)
+
         def do_get() -> None:
             if not self._validate_host(host.text(), field="Host"):
                 return
+            selected = version.currentText()
+            if selected in {"v1", "v2c"} and not community.text().strip():
+                self.error_banner.show_event(
+                    ErrorEvent(
+                        severity="warning",
+                        category="unknown",
+                        source="Protocol Troubleshooter",
+                        operation="validate",
+                        message=f"A read-only community is required for SNMP{selected}.",
+                        suggested_fix="Enter the community you are authorized to use "
+                        "(commonly 'public' for read-only). PacketForge never guesses it.",
+                    )
+                )
+                return
             config = snmp.SnmpProbe(
                 host=host.text().strip(),
-                version=version.currentText(),
+                version=selected,
                 community=community.text(),
                 v3_username=username.text().strip(),
                 timeout_s=float(timeout.value()),
             )
             self._run(lambda: snmp.get(config), output, run)
 
+        version.currentTextChanged.connect(lambda _v: sync_fields())
         run.clicked.connect(do_get)
+        sync_fields()
         return widget
 
     # --- SMTP -----------------------------------------------------------
@@ -338,18 +387,34 @@ class ProtocolTroubleshooterTab(QWidget):
     def _smtp_panel(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        info = QLabel(
+            "Read-only inspection: connects, reads the banner, sends EHLO, and checks "
+            "for STARTTLS. No mail is ever sent."
+        )
+        info.setObjectName("Muted")
+        info.setWordWrap(True)
+        layout.addWidget(info)
         form = QFormLayout()
         layout.addLayout(form)
         host = QLineEdit("mail.example.com")
+        host.setPlaceholderText("mail server IP or hostname, e.g. 192.168.4.25")
+        host.setToolTip("The mail server to inspect, e.g. 192.168.4.25 or mail.lab.example.")
         port = self._spin(1, 65535, 25)
+        port.setToolTip("SMTP port: 25 (MTA), 587 (submission), or 465/2525 in labs.")
         ehlo = QLineEdit("packetforge.local")
+        ehlo.setPlaceholderText("EHLO hostname to announce, e.g. packetforge.local")
+        ehlo.setToolTip("The hostname PacketForge announces in EHLO. Any valid name is fine.")
         timeout = self._spin(1, 30, 5)
         form.addRow("Host", host)
         form.addRow("Port", port)
         form.addRow("EHLO name", ehlo)
         form.addRow("Timeout (s)", timeout)
 
-        output = self._output()
+        output = self._output(
+            "Enter a mail server and port (25 or 587), then run the check to see the "
+            "banner, advertised EHLO capabilities, and whether STARTTLS is offered. "
+            "Read-only — no mail is sent."
+        )
         run = QPushButton("Banner + EHLO + STARTTLS check")
         layout.addWidget(run)
         layout.addWidget(output, 1)
