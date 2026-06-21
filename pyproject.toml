@@ -1,0 +1,121 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "packetforge"
+version = "0.1.0"
+description = "A local desktop packet crafting and diagnostics workbench powered by Scapy."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "PacketForge Contributors" }]
+keywords = ["networking", "scapy", "pyside6", "discovery", "diagnostics", "pcap"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: X11 Applications :: Qt",
+  "Environment :: MacOS X",
+  "Intended Audience :: System Administrators",
+  "Intended Audience :: Telecommunications Industry",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Networking :: Monitoring",
+  "Topic :: System :: Networking",
+]
+dependencies = [
+  "PySide6>=6.7",
+  "pydantic>=2.7",
+  "pyqtgraph>=0.13.7",
+  "scapy>=2.5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/packetforge/packetforge"
+Repository = "https://github.com/packetforge/packetforge"
+Issues = "https://github.com/packetforge/packetforge/issues"
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.10",
+  "pytest>=8.2",
+  "ruff>=0.5",
+]
+# Tools for building a standalone local desktop bundle. Install with
+# `pip install -e ".[package]"` only when you intend to package the app.
+package = [
+  "pyinstaller>=6.6",
+]
+briefcase = [
+  "briefcase>=0.3.19",
+]
+
+[project.scripts]
+packetforge = "packetforge.main:main"
+
+[project.gui-scripts]
+packetforge-gui = "packetforge.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["packetforge"]
+# Ship bundled assets (icon, etc.) alongside the Python modules.
+artifacts = ["packetforge/assets/*"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "packetforge",
+  "tests",
+  "packaging",
+  "README.md",
+  "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "T20", "RUF"]
+ignore = ["RUF012"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+# Optional Briefcase packaging (experimental alternative to PyInstaller).
+# Run `briefcase create`, `briefcase build`, `briefcase package` after
+# installing the `briefcase` extra.
+[tool.briefcase]
+project_name = "PacketForge"
+bundle = "org.packetforge"
+version = "0.1.0"
+url = "https://github.com/packetforge/packetforge"
+license = "MIT"
+author = "PacketForge Contributors"
+author_email = "packetforge@example.com"
+
+[tool.briefcase.app.packetforge]
+formal_name = "PacketForge"
+description = "Local desktop packet crafting and diagnostics workbench powered by Scapy."
+sources = ["packetforge"]
+icon = "packetforge/assets/icon"
+requires = [
+  "PySide6>=6.7",
+  "pydantic>=2.7",
+  "pyqtgraph>=0.13.7",
+  "scapy>=2.5.0",
+]
+
+[tool.briefcase.app.packetforge.macOS]
+requires = []
+
+[tool.briefcase.app.packetforge.linux]
+requires = []
