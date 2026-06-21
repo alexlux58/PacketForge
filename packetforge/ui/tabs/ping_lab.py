@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -78,7 +80,7 @@ class PingLabTab(QWidget):
             "splitter/ping_lab",
             default_sizes=[380, 520],
         )
-        root.addWidget(top, 0)
+        root.addWidget(top, 1)
         top.addWidget(self._build_controls())
         top.addWidget(self._build_chart())
         top.restore()
@@ -130,7 +132,13 @@ class PingLabTab(QWidget):
     def _build_controls(self) -> QGroupBox:
         box = QGroupBox("Controls")
         box.setMinimumWidth(340)
-        form = QFormLayout(box)
+        outer = QVBoxLayout(box)
+        outer.setContentsMargins(8, 8, 8, 8)
+
+        # Many fields + buttons exceed a short window, so the fields scroll while
+        # the action buttons stay pinned and reachable below.
+        form_host = QWidget()
+        form = QFormLayout(form_host)
         configure_form_layout(form)
 
         self.destination = QLineEdit("192.168.1.1")
@@ -181,6 +189,14 @@ class PingLabTab(QWidget):
         form.addRow("Record PCAP", self.record_pcap)
         form.addRow("Size breakdown", self.size_label)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(form_host)
+        scroll.setMinimumHeight(150)
+        outer.addWidget(scroll, 1)
+
         run_buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
         self.stop_button = QPushButton("Stop")
@@ -205,13 +221,8 @@ class PingLabTab(QWidget):
         for button in [self.export_pcap, self.export_csv, self.export_json]:
             export_buttons.addWidget(button)
 
-        button_panel = QWidget()
-        button_layout = QVBoxLayout(button_panel)
-        button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(6)
-        button_layout.addLayout(run_buttons)
-        button_layout.addLayout(export_buttons)
-        form.addRow(button_panel)
+        outer.addLayout(run_buttons)
+        outer.addLayout(export_buttons)
 
         self.run_button.clicked.connect(self.start_ping)
         self.stop_button.clicked.connect(self.stop_ping)

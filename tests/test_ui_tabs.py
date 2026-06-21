@@ -158,3 +158,49 @@ def test_fingerprinting_prefills_host_and_reuses_open_ports(qapp) -> None:  # ty
     # Only open TCP ports are reused for banner probes.
     assert tab._ports_for("192.168.4.1") == (22, 80)
     assert tab._ports_for("10.9.9.9") is None
+
+
+# --- layout / discoverability fixes -----------------------------------------
+
+
+def _buttons(widget) -> set[str]:  # type: ignore[no-untyped-def]
+    from PySide6.QtWidgets import QPushButton
+
+    return {b.text() for b in widget.findChildren(QPushButton)}
+
+
+def test_ping_lab_controls_scroll_and_buttons_present(qapp) -> None:  # type: ignore[no-untyped-def]
+    from PySide6.QtWidgets import QScrollArea
+
+    from packetforge.ui.tabs.ping_lab import PingLabTab
+
+    tab = PingLabTab()
+    # The tall form is scrollable so the action buttons can't be clipped off.
+    assert tab.findChildren(QScrollArea)
+    assert {"Run", "Stop", "Save CSV"} <= _buttons(tab)
+
+
+def test_packet_builder_exposes_build_and_send(qapp) -> None:  # type: ignore[no-untyped-def]
+    from packetforge.presets.storage import PresetStore
+    from packetforge.ui.tabs.packet_builder import PacketBuilderTab
+
+    tab = PacketBuilderTab(PresetStore())
+    assert {"Build", "Send", "Send and Wait", "Send Multiple"} <= _buttons(tab)
+
+
+def test_scapy_console_exposes_action_buttons(qapp) -> None:  # type: ignore[no-untyped-def]
+    from packetforge.ui.tabs.console import SafeConsoleTab
+
+    tab = SafeConsoleTab()
+    assert {"Validate", "Build", "Send"} <= _buttons(tab)
+
+
+def test_chart_legend_is_opaque_and_readable(qapp) -> None:  # type: ignore[no-untyped-def]
+    # Regression: legends used to be transparent and unreadable over bars.
+    import pyqtgraph as pg
+
+    from packetforge.ui import charts
+
+    legend = charts._add_legend(pg.PlotWidget())
+    assert legend.brush().color().alpha() == 255
+    assert legend.labelTextColor().name().lower() == "#e7edf3"
