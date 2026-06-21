@@ -196,6 +196,36 @@ def check_pcap_write(directory: str | Path | None = None) -> CheckResult:
         )
 
 
+def check_qt_platform_plugins() -> CheckResult:
+    if sys.platform != "darwin":
+        return CheckResult("Qt platform plugins", "ok", "not required on this platform")
+    from packetforge.qt_bootstrap import cocoa_plugin_hidden, configure_qt_plugins
+
+    hidden = cocoa_plugin_hidden()
+    if hidden is None:
+        return CheckResult(
+            "Qt platform plugins",
+            "warning",
+            "PySide6 cocoa plugin not found",
+            "Reinstall with 'pip install --force-reinstall PySide6'.",
+        )
+    if hidden:
+        configure_qt_plugins()
+        hidden = cocoa_plugin_hidden()
+    if hidden:
+        return CheckResult(
+            "Qt platform plugins",
+            "fail",
+            "macOS marked libqcocoa.dylib as hidden",
+            (
+                "Qt cannot load hidden plugins. Avoid iCloud-synced venv folders. "
+                "Run PacketForge again — it clears hidden flags at startup. If needed: "
+                "chflags -R nohidden .venv/lib/python*/site-packages/PySide6/Qt/plugins"
+            ),
+        )
+    return CheckResult("Qt platform plugins", "ok", "cocoa plugin visible to Qt")
+
+
 def run_environment_checks(
     *,
     interfaces: Iterable[str] | None = None,
@@ -208,6 +238,7 @@ def run_environment_checks(
             check_python_version(),
             check_scapy(),
             check_pyside6(),
+            check_qt_platform_plugins(),
             check_interfaces(None if interfaces is None else list(interfaces)),
             check_raw_socket_privilege(raw_sockets=raw_sockets),
             check_pcap_write(pcap_directory),

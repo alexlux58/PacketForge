@@ -94,10 +94,23 @@ On macOS, Homebrew's default `python3` may be 3.14. Install 3.12 explicitly:
 
 ```bash
 brew install python@3.12
+./scripts/fix_venv.sh
+source .venv/bin/activate
+packetforge
+```
+
+`scripts/fix_venv.sh` creates/refreshes `.venv`, installs the package editable, clears macOS
+**hidden** flags (common when the repo lives in iCloud-synced `~/Documents`), and installs a
+robust `packetforge` launcher that does not depend on a fragile `.pth` file.
+
+Manual equivalent:
+
+```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e ".[dev]"
+./scripts/fix_venv.sh
 packetforge
 ```
 
@@ -167,10 +180,18 @@ Briefcase metadata lives under `[tool.briefcase]` in `pyproject.toml`.
 
 ## Troubleshooting (Scapy / PySide6 install)
 
-- **`qt.qpa.plugin: Could not find the Qt platform plugin "cocoa"` (macOS).** This usually means
-  you are on **Python 3.14+**, which PySide6 does not fully support yet. Recreate the venv with
-  Python 3.12 or 3.13: `brew install python@3.12 && python3.12 -m venv .venv`. Confirm with
-  `python --version` before reinstalling.
+- **`ModuleNotFoundError: No module named 'packetforge'`.** The editable-install `.pth` file in
+  `.venv` is missing or marked **hidden** (common under iCloud-synced `~/Documents`). Run
+  `./scripts/fix_venv.sh` from the project root, then `packetforge` again.
+- **`qt.qpa.plugin: Could not find the Qt platform plugin "cocoa"` (macOS).** Common causes:
+  - **Python 3.14+** — PySide6 GUI plugins are not supported yet. Use Python 3.12 or 3.13.
+  - **Hidden Qt plugins** — on macOS, pip/iCloud can mark `libqcocoa.dylib` with the `hidden`
+    file flag so Qt never discovers it (`…plugin "cocoa" in ""`). PacketForge clears this at
+    startup; if it still fails, run:
+    `chflags -R nohidden .venv/lib/python*/site-packages/PySide6/Qt/plugins`
+  - **iCloud-synced venv** — keep `.venv` outside iCloud Drive (e.g. move the project or venv
+    to `~/Developer`).
+  - Recreate the venv: `brew install python@3.12 && python3.12 -m venv .venv && pip install -e ".[dev]"`.
 - **`qt.qpa.plugin: could not load the Qt platform plugin "xcb"` (Linux).** Install the platform
   libraries: `sudo apt-get install -y libxcb-cursor0 libgl1 libegl1` (Debian/Ubuntu). For headless
   servers/CI, set `QT_QPA_PLATFORM=offscreen`.

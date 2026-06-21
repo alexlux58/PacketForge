@@ -99,6 +99,7 @@ def test_run_environment_checks_aggregates_all() -> None:
         "Python version",
         "Scapy",
         "PySide6",
+        "Qt platform plugins",
         "Interfaces",
         "Raw socket privilege",
         "PCAP write test",
