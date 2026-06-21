@@ -41,6 +41,15 @@ def _empty(message: str) -> QWidget:
     return holder
 
 
+def _add_legend(plot: pg.PlotWidget) -> pg.LegendItem:
+    """Add a legend with an opaque background so keys stay readable over bars."""
+    legend = plot.addLegend(offset=(-10, 10))
+    legend.setBrush(pg.mkBrush("#1b2128"))
+    legend.setPen(pg.mkPen("#3b4654"))
+    legend.setLabelTextColor("#e7edf3")
+    return legend
+
+
 def bar_chart(series: ChartSeries, *, height: int | None = None) -> QWidget:
     if series.is_empty:
         return _empty(f"No data for: {series.name}")
@@ -71,7 +80,7 @@ def grouped_bar_chart(
     axis_items = {"bottom": _category_axis(categories)} if categories else {}
     plot = pg.PlotWidget(axisItems=axis_items)
     plot.setTitle(title)
-    plot.addLegend(offset=(-10, 10))
+    _add_legend(plot)
     count = len(non_empty)
     group_width = 0.8
     bar_width = group_width / max(1, count)
@@ -101,7 +110,7 @@ def line_chart(
         return _empty(f"No data for: {title}")
     plot = pg.PlotWidget()
     plot.setTitle(title)
-    plot.addLegend(offset=(-10, 10))
+    _add_legend(plot)
     first = non_empty[0]
     if first.x_label:
         plot.setLabel("bottom", first.x_label)
