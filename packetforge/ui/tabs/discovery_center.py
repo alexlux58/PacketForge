@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from packetforge.engine.history import DiscoveryHistory
 from packetforge.engine.observability import reachability_breakdown
+from packetforge.engine.ports import parse_port_list
 from packetforge.engine.targets import parse_targets, preview_targets
 from packetforge.errors import ErrorEvent, report_exception
 from packetforge.models.discovery import (
@@ -49,6 +51,7 @@ from packetforge.ui.workers import DiscoveryWorker
 from packetforge.utils.export import (
     export_hosts_csv,
     export_hosts_json,
+    export_hosts_markdown,
     export_packets_to_pcap,
     export_run_json,
 )
@@ -56,6 +59,7 @@ from packetforge.utils.export import (
 _METHOD_LABELS: list[tuple[DiscoveryMethod, str]] = [
     ("icmp", "ICMP echo"),
     ("tcp", "TCP connect"),
+    ("tcp_syn", "TCP SYN (raw)"),
     ("udp", "UDP probe"),
     ("arp", "ARP (local L2)"),
     ("dns_reverse", "DNS reverse"),
@@ -80,12 +84,19 @@ _FIELD_TOOLTIPS: dict[str, str] = {
 class DiscoveryCenterTab(QWidget):
     status_message = Signal(str)
 
-    def __init__(self, state: DiscoveryState) -> None:
+    def __init__(
+        self,
+        state: DiscoveryState,
+        *,
+        history: DiscoveryHistory | None = None,
+        preferences: AppPreferences | None = None,
+    ) -> None:
         super().__init__()
         self.state = state
         self.worker: DiscoveryWorker | None = None
         self.privileges = detect_privileges()
-        self.prefs = AppPreferences()
+        self.prefs = preferences or AppPreferences()
+        self.history = history or DiscoveryHistory()
         self._row_for_ip: dict[str, int] = {}
 
         root = QVBoxLayout(self)
@@ -119,6 +130,12 @@ class DiscoveryCenterTab(QWidget):
         self._mini_timer.timeout.connect(self._refresh_mini)
 
         self.state.hosts_changed.connect(self._sync_from_state)
+
+    def apply_preferences(self) -> None:
+        """Refresh discovery defaults after Settings changes."""
+        self.profile.setCurrentText(self.prefs.default_scan_profile)
+        if self.prefs.default_interface:
+            self.interface.setCurrentText(self.prefs.default_interface)
 
     def _build_results_panel(self) -> QWidget:
         panel = QWidget()
@@ -193,7 +210,7 @@ class DiscoveryCenterTab(QWidget):
 
         self.profile = tune_combo_box(QComboBox())
         self.profile.addItems([profile.name for profile in BUILTIN_PROFILES])
-        self.profile.setCurrentText("Balanced")
+        self.profile.setCurrentText(self.prefs.default_scan_profile)
         self.profile.currentTextChanged.connect(self._update_profile_hint)
         self.profile_hint = QLabel("")
         self.profile_hint.setObjectName("Muted")
@@ -265,8 +282,9 @@ class DiscoveryCenterTab(QWidget):
         export_buttons = QHBoxLayout()
         self.export_csv = QPushButton("Export CSV")
         self.export_json = QPushButton("Export JSON")
+        self.export_markdown = QPushButton("Export MD")
         self.export_pcap = QPushButton("Export PCAP")
-        for button in (self.export_csv, self.export_json, self.export_pcap):
+        for button in (self.export_csv, self.export_json, self.export_markdown, self.export_pcap):
             export_buttons.addWidget(button)
 
         button_panel = QWidget()
@@ -284,6 +302,7 @@ class DiscoveryCenterTab(QWidget):
         self.clear_button.clicked.connect(self.clear)
         self.export_csv.clicked.connect(self.save_csv)
         self.export_json.clicked.connect(self.save_json)
+        self.export_markdown.clicked.connect(self.save_markdown)
         self.export_pcap.clicked.connect(self.save_pcap)
 
         self._update_estimate()
@@ -330,11 +349,7 @@ class DiscoveryCenterTab(QWidget):
         return [method for method, box in self.method_boxes.items() if box.isChecked()]
 
     def _parse_ports(self, text: str) -> list[int]:
-        ports: list[int] = []
-        for token in text.replace(" ", "").split(","):
-            if token.isdigit() and 0 <= int(token) <= 65535:
-                ports.append(int(token))
-        return ports
+        return parse_port_list(text)
 
     def _config(self) -> DiscoveryConfig:
         return DiscoveryConfig(
@@ -435,10 +450,8 @@ class DiscoveryCenterTab(QWidget):
         self.host_table.end_bulk_update()
         self.host_table.resize_columns_to_contents()
         self.state.set_run(run)
-        from packetforge.engine.history import DiscoveryHistory
-
         try:
-            DiscoveryHistory().save(run)
+            self.history.save(run)
         except OSError as exc:
             self._append_log(f"Could not persist run: {exc}")
         self.progress_label.setText(f"Complete — {run.host_count} host(s)")
@@ -557,6 +570,18 @@ class DiscoveryCenterTab(QWidget):
             export_run_json(self.state.last_run, Path(path))
         else:
             export_hosts_json(hosts, Path(path))
+
+    def save_markdown(self) -> None:
+        hosts = self._hosts()
+        if not hosts:
+            QMessageBox.information(self, "No hosts", "Run a discovery scan first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Markdown", "discovery.md", "Markdown (*.md)"
+        )
+        if path:
+            export_hosts_markdown(hosts, Path(path), self.state.last_run)
+            self.status_message.emit(f"Exported {len(hosts)} host(s) to Markdown")
 
     def save_pcap(self) -> None:
         packets = self.worker.captured_packets if self.worker else []

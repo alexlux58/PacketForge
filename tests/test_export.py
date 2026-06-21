@@ -16,11 +16,13 @@ from packetforge.models.results import PingResult
 from packetforge.utils.export import (
     export_hosts_csv,
     export_hosts_json,
+    export_hosts_markdown,
     export_packets_to_pcap,
     export_ping_results_csv,
     export_ping_results_json,
     export_run_json,
     load_packets_from_pcap,
+    render_hosts_markdown,
 )
 
 
@@ -110,3 +112,19 @@ def test_run_json_is_valid_and_reloadable(
     reloaded = DiscoveryRun.model_validate_json(path.read_text(encoding="utf-8"))
     assert reloaded.id == run.id
     assert reloaded.host_count == 1
+
+
+def test_hosts_markdown_contains_summary_and_services(
+    tmp_path, make_host: Callable[..., HostRecord]
+) -> None:  # type: ignore[no-untyped-def]
+    run = DiscoveryRun(profile="Balanced", targets="10.0.0.0/30")
+    host = make_host("10.0.0.5", hostname="server", methods=["tcp_syn"])
+    content = render_hosts_markdown([host], run)
+    assert "# Discovery Report" in content
+    assert "10.0.0.5" in content
+    assert "server" in content
+    assert "80/tcp: open" in content
+
+    path = tmp_path / "hosts.md"
+    export_hosts_markdown([host], path, run)
+    assert path.read_text(encoding="utf-8") == content

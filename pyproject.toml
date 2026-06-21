@@ -69,6 +69,7 @@ include = [
   "packetforge",
   "tests",
   "packaging",
+  "docs",
   "README.md",
   "pyproject.toml",
 ]

@@ -141,6 +141,68 @@ def test_run_tcp_discovery_records_and_merges(monkeypatch: pytest.MonkeyPatch) -
     assert any("Discovery finished" in line for line in logs)
 
 
+def test_run_tcp_syn_discovery_records_raw_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        discovery,
+        "detect_privileges",
+        lambda: PrivilegeReport(
+            is_root=True, raw_sockets=True, platform_name="Test", notes=[]
+        ),
+    )
+
+    def fake_syn(_ip: str, port: int, _timeout: float, _iface: str | None):  # type: ignore[no-untyped-def]
+        if port == 22:
+            return "closed", 2.5
+        if port == 443:
+            return "open", 3.5
+        return "filtered", None
+
+    monkeypatch.setattr(discovery, "_tcp_syn_probe", fake_syn)
+
+    engine = DiscoveryEngine()
+    config = DiscoveryConfig(
+        targets="10.0.0.10",
+        methods=["tcp_syn"],
+        tcp_ports=[22, 443, 8443],
+        profile_name="Gentle",
+        resolve_hostnames=False,
+    )
+    run = engine.run(config)
+
+    assert run.host_count == 1
+    host = run.hosts[0]
+    assert host.methods == ["tcp_syn"]
+    assert host.latency_ms == 2.5
+    assert [(service.port, service.state) for service in host.services] == [
+        (22, "closed"),
+        (443, "open"),
+    ]
+    assert host.open_ports == [443]
+
+
+def test_tcp_syn_without_raw_sockets_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        discovery,
+        "detect_privileges",
+        lambda: PrivilegeReport(
+            is_root=False, raw_sockets=False, platform_name="Test", notes=[]
+        ),
+    )
+    monkeypatch.setattr(
+        discovery,
+        "_tcp_syn_probe",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("syn should be skipped")),
+    )
+    logs: list[str] = []
+    run = DiscoveryEngine().run(
+        DiscoveryConfig(targets="10.0.0.1", methods=["tcp_syn"], resolve_hostnames=False),
+        on_log=logs.append,
+    )
+
+    assert run.hosts == []
+    assert any("tcp syn" in line.lower() and "raw sockets" in line.lower() for line in logs)
+
+
 def test_icmp_without_raw_sockets_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         discovery,

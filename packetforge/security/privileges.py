@@ -41,7 +41,7 @@ def detect_privileges() -> PrivilegeReport:
     notes: list[str] = []
     if not raw_sockets:
         notes.append(
-            "ARP scan, ICMP echo, and OS fingerprinting need raw sockets; "
+            "ARP scan, ICMP echo, TCP SYN probes, and OS fingerprinting need raw sockets; "
             "run with elevated privileges (sudo / setcap) to enable them."
         )
         notes.append(
@@ -70,5 +70,5 @@ def _can_open_raw_socket() -> bool:
 
 
 # Which discovery methods need raw socket privileges to run reliably.
-PRIVILEGED_METHODS = frozenset({"arp", "icmp"})
+PRIVILEGED_METHODS = frozenset({"arp", "icmp", "tcp_syn"})
 UNPRIVILEGED_METHODS = frozenset({"tcp", "udp", "dns_reverse", "passive"})

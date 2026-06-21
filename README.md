@@ -12,10 +12,11 @@ Python-native libraries for packet construction, transmission, inspection, and P
 ## Workbench
 
 - **Discovery Center** - CIDR/range/single-host/hostname targets, interface selector, and
-  ICMP, TCP connect, UDP, ARP (local L2), reverse DNS, and passive-capture discovery. Live
+  ICMP, TCP connect, TCP SYN (when raw sockets are available), UDP, ARP (local L2), reverse
+  DNS, and passive-capture discovery. Live
   host table (IP, MAC, vendor, hostname, latency, ports, protocols, confidence, last seen),
   Gentle / Balanced / Lab Fast rate-limited profiles, start/stop/pause/resume/clear, and
-  CSV / JSON / PCAP export.
+  CSV / JSON / Markdown / PCAP export.
 - **Fingerprinting** - TTL/hop-limit, TCP window size, MSS/window-scale/SACK/timestamps,
   ICMP behaviour, and service banners. Reports a *likely* OS family with a confidence score
   and the evidence behind it; never claims an exact OS. Evidence is stored per host.
@@ -73,7 +74,8 @@ Python-native libraries for packet construction, transmission, inspection, and P
   Python version, that Scapy and PySide6 import, which interfaces are detected, raw-socket
   privilege status, and a PCAP write self-test (writes and re-reads one crafted packet to a temp
   file - no network traffic). Each check shows OK/WARN/FAIL with a suggested fix.
-- **Run history** - discovery runs are persisted locally and can be compared.
+- **Run history** - discovery runs persist under `~/.packetforge/history`. The **History** tab
+  lets you browse, load, compare with the current session, and delete saved runs.
 
 ## Original tools (still available)
 
@@ -134,8 +136,9 @@ sudo setcap cap_net_raw,cap_net_admin+eip dist/PacketForge/PacketForge
 ```
 
 Remove it later with `sudo setcap -r <path>`. If you skip this, unprivileged fallbacks
-(TCP connect, UDP, DNS, SMTP, NTP, SNMP, passive parsing) still work; the status bar and the
-Environment Check screen show whether raw sockets are available.
+(TCP connect, UDP, DNS, SMTP, NTP, SNMP, passive parsing) still work; TCP SYN, ARP, ICMP,
+and raw fingerprint probes stay disabled. The status bar and the Environment Check screen show
+whether raw sockets are available.
 
 ## Packaging a standalone bundle (optional)
 
@@ -185,7 +188,11 @@ Briefcase metadata lives under `[tool.briefcase]` in `pyproject.toml`.
 ## Development
 
 ```bash
-ruff check .
-mypy packetforge
-pytest
+.venv/bin/python -m ruff check .
+.venv/bin/python -m mypy packetforge
+.venv/bin/python -m pytest
 ```
+
+See [docs/TESTING.md](docs/TESTING.md) for GUI smoke-test notes and Qt platform-plugin
+troubleshooting. See [docs/IMPROVEMENT_PLAN.md](docs/IMPROVEMENT_PLAN.md) for the audit
+backlog and [docs/RESEARCH_NOTES.md](docs/RESEARCH_NOTES.md) for design references.

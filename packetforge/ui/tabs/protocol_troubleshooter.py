@@ -18,11 +18,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from packetforge.engine.interfaces import list_interfaces
 from packetforge.engine.protocols import bgp, dhcp, dns, ntp, ospf, smtp, snmp, stp
+from packetforge.engine.targets import validate_host_token
+from packetforge.errors import ErrorEvent
 from packetforge.models.discovery import ProtocolProbeResult
 from packetforge.ui.state import ObservabilityState
 from packetforge.ui.widgets.error_banner import ErrorBanner
+from packetforge.ui.widgets.interface_combo import defer_populate_interface_combo, tune_combo_box
 from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.workers import ProtocolWorker
 
@@ -70,6 +72,18 @@ class ProtocolTroubleshooterTab(QWidget):
         return view
 
     def _run(self, task: ProbeTask, output: QPlainTextEdit, button: QPushButton) -> None:
+        if any(worker.isRunning() for worker in self.workers):
+            self.error_banner.show_event(
+                ErrorEvent(
+                    severity="info",
+                    category="unknown",
+                    source="Protocol Troubleshooter",
+                    operation="probe",
+                    message="A probe is already running.",
+                    suggested_fix="Wait for the current probe to finish before starting another.",
+                )
+            )
+            return
         button.setEnabled(False)
         self.error_banner.clear()
         output.setPlainText("Running...")
@@ -131,10 +145,41 @@ class ProtocolTroubleshooterTab(QWidget):
         return reply == QMessageBox.StandardButton.Yes
 
     def _interface_combo(self) -> QComboBox:
-        combo = QComboBox()
-        combo.addItem("")
-        combo.addItems(list_interfaces())
+        combo = tune_combo_box(QComboBox())
+        defer_populate_interface_combo(combo)
         return combo
+
+    def _validate_host(self, value: str, *, field: str) -> bool:
+        ok, message = validate_host_token(value)
+        if ok:
+            return True
+        self.error_banner.show_event(
+            ErrorEvent(
+                severity="warning",
+                category="invalid_cidr",
+                source="Protocol Troubleshooter",
+                operation="validate",
+                message=f"{field}: {message}",
+                suggested_fix="Enter a valid IPv4/IPv6 address or hostname.",
+            )
+        )
+        return False
+
+    def _validate_name(self, value: str, *, field: str) -> bool:
+        cleaned = value.strip()
+        if cleaned:
+            return True
+        self.error_banner.show_event(
+            ErrorEvent(
+                severity="warning",
+                category="invalid_cidr",
+                source="Protocol Troubleshooter",
+                operation="validate",
+                message=f"{field} is required.",
+                suggested_fix="Enter a DNS name, IP address, or hostname.",
+            )
+        )
+        return False
 
     # --- DNS ------------------------------------------------------------
 
@@ -164,6 +209,10 @@ class ProtocolTroubleshooterTab(QWidget):
         layout.addWidget(output, 1)
 
         def do_query() -> None:
+            if not self._validate_name(name.text(), field="Name / IP"):
+                return
+            if not self._validate_host(resolver.text(), field="Resolver"):
+                return
             query = dns.DnsQuery(
                 name=name.text().strip(),
                 qtype=qtype.currentText(),
@@ -270,6 +319,8 @@ class ProtocolTroubleshooterTab(QWidget):
         layout.addWidget(output, 1)
 
         def do_get() -> None:
+            if not self._validate_host(host.text(), field="Host"):
+                return
             config = snmp.SnmpProbe(
                 host=host.text().strip(),
                 version=version.currentText(),
@@ -304,6 +355,8 @@ class ProtocolTroubleshooterTab(QWidget):
         layout.addWidget(output, 1)
 
         def do_probe() -> None:
+            if not self._validate_host(host.text(), field="Host"):
+                return
             config = smtp.SmtpProbe(
                 host=host.text().strip(),
                 port=port.value(),
@@ -333,6 +386,8 @@ class ProtocolTroubleshooterTab(QWidget):
         layout.addWidget(output, 1)
 
         def do_probe() -> None:
+            if not self._validate_host(host.text(), field="Host"):
+                return
             config = ntp.NtpProbe(host=host.text().strip(), timeout_s=float(timeout.value()))
             self._run(lambda: ntp.probe(config), output, run)
 
@@ -363,6 +418,8 @@ class ProtocolTroubleshooterTab(QWidget):
         layout.addWidget(output, 1)
 
         def do_probe() -> None:
+            if not self._validate_host(host.text(), field="Host"):
+                return
             if lab_mode.isChecked() and not self._confirm(
                 "Send BGP OPEN",
                 "Lab mode sends a BGP OPEN to the peer. Only do this on routers you own.\n\n"

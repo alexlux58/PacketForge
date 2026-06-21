@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 DiscoveryMethod = Literal[
     "icmp",
     "tcp",
+    "tcp_syn",
     "udp",
     "arp",
     "dns_reverse",

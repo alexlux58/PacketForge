@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -130,10 +131,29 @@ class SimulationTab(QWidget):
         if checked:
             if not self.sim_state.active:
                 self._load_selected()
+        elif not self._confirm_clear("Disable simulation mode?"):
+            self.toggle.blockSignals(True)
+            self.toggle.setChecked(True)
+            self.toggle.blockSignals(False)
         else:
-            self._clear()
+            self._clear(skip_confirm=True)
 
-    def _clear(self) -> None:
+    def _confirm_clear(self, title: str) -> bool:
+        if not self.sim_state.active and not self.discovery_state.hosts():
+            return True
+        reply = QMessageBox.warning(
+            self,
+            title,
+            "This clears all discovery and observability data in the current session, "
+            "including real scan results — not just simulated data.\n\nProceed?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _clear(self, *, skip_confirm: bool = False) -> None:
+        if not skip_confirm and not self._confirm_clear("Clear simulated data?"):
+            return
         self.discovery_state.clear()
         self.obs_state.clear()
         self.sim_state.deactivate()

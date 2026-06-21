@@ -15,14 +15,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from packetforge.engine.interfaces import list_interfaces
 from packetforge.engine.observability import confidence_distribution
+from packetforge.engine.targets import validate_host_token
 from packetforge.errors import ErrorEvent
 from packetforge.models.discovery import FingerprintEvidence, HostRecord
 from packetforge.security.privileges import detect_privileges
 from packetforge.ui import charts
 from packetforge.ui.state import DiscoveryState
 from packetforge.ui.widgets.error_banner import ErrorBanner
+from packetforge.ui.widgets.interface_combo import defer_populate_interface_combo, tune_combo_box
 from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.workers import FingerprintWorker
 
@@ -57,9 +58,8 @@ class FingerprintingTab(QWidget):
         self.host_combo.setMinimumWidth(220)
         controls.addWidget(self.host_combo)
         controls.addWidget(QLabel("Interface:"))
-        self.interface = QComboBox()
-        self.interface.addItem("")
-        self.interface.addItems(list_interfaces())
+        self.interface = tune_combo_box(QComboBox())
+        defer_populate_interface_combo(self.interface)
         controls.addWidget(self.interface)
         self.run_button = QPushButton("Fingerprint host")
         self.run_button.clicked.connect(self.run_fingerprint)
@@ -147,6 +147,19 @@ class FingerprintingTab(QWidget):
         host = self._target_host()
         if not host:
             QMessageBox.information(self, "No host", "Choose or type a host to fingerprint.")
+            return
+        ok, message = validate_host_token(host)
+        if not ok:
+            self.error_banner.show_event(
+                ErrorEvent(
+                    severity="warning",
+                    category="invalid_cidr",
+                    source="Fingerprinting",
+                    operation="validate",
+                    message=message,
+                    suggested_fix="Enter a valid IPv4/IPv6 address or hostname.",
+                )
+            )
             return
         if self.worker and self.worker.isRunning():
             return

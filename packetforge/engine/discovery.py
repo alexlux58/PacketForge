@@ -5,6 +5,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from datetime import UTC, datetime
 
 from packetforge.engine.merge import upsert_host
@@ -27,10 +28,27 @@ LogCallback = Callable[[str], None]
 
 # Minimal, well-known service names so the UI shows something useful without nmap.
 _SERVICE_NAMES: dict[int, str] = {
-    21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 80: "http",
-    110: "pop3", 123: "ntp", 135: "msrpc", 139: "netbios", 143: "imap",
-    161: "snmp", 179: "bgp", 443: "https", 445: "smb", 500: "isakmp",
-    587: "submission", 993: "imaps", 995: "pop3s", 3389: "rdp", 8080: "http-alt",
+    21: "ftp",
+    22: "ssh",
+    23: "telnet",
+    25: "smtp",
+    53: "dns",
+    80: "http",
+    110: "pop3",
+    123: "ntp",
+    135: "msrpc",
+    139: "netbios",
+    143: "imap",
+    161: "snmp",
+    179: "bgp",
+    443: "https",
+    445: "smb",
+    500: "isakmp",
+    587: "submission",
+    993: "imaps",
+    995: "pop3s",
+    3389: "rdp",
+    8080: "http-alt",
 }
 
 
@@ -98,7 +116,7 @@ class DiscoveryEngine:
             self._run_arp(config, profile, limiter, privileges.raw_sockets, on_host, log)
 
         active_methods: list[DiscoveryMethod] = [
-            m for m in config.methods if m in {"icmp", "tcp", "udp"}
+            m for m in config.methods if m in {"icmp", "tcp", "tcp_syn", "udp"}
         ]
         if active_methods and targets:
             self._run_active(
@@ -146,6 +164,8 @@ class DiscoveryEngine:
     ) -> None:
         if "icmp" in methods and not raw_ok:
             log("ICMP echo needs raw sockets; skipping (run elevated to enable).")
+        if "tcp_syn" in methods and not raw_ok:
+            log("TCP SYN probes need raw sockets; skipping (TCP connect still works).")
 
         def worker(target: str) -> None:
             if self.stop_event.is_set():
@@ -177,7 +197,10 @@ class DiscoveryEngine:
         timeout = profile.probe_timeout_ms / 1000
         found_methods: list[DiscoveryMethod] = []
         latency: float | None = None
-        services: list[ServiceRecord] = []
+        services: dict[tuple[int, str], ServiceRecord] = {}
+
+        def add_service(record: ServiceRecord) -> None:
+            services[(record.port, record.protocol)] = record
 
         if "icmp" in methods and raw_ok:
             limiter.acquire()
@@ -200,10 +223,28 @@ class DiscoveryEngine:
                         found_methods.append("tcp")
                     if latency is None:
                         latency = rtt
-                    services.append(
+                    add_service(
                         ServiceRecord(
                             port=port, protocol="tcp", state=state,
                             name=service_name(port), banner=banner,
+                        )
+                    )
+
+        if "tcp_syn" in methods and raw_ok:
+            for port in config.tcp_ports[: profile.max_ports_per_host]:
+                if self.stop_event.is_set():
+                    break
+                self._wait_if_paused()
+                limiter.acquire()
+                state, rtt = _tcp_syn_probe(target, port, timeout, config.interface)
+                if state in {"open", "closed"}:
+                    if "tcp_syn" not in found_methods:
+                        found_methods.append("tcp_syn")
+                    if latency is None:
+                        latency = rtt
+                    add_service(
+                        ServiceRecord(
+                            port=port, protocol="tcp", state=state, name=service_name(port)
                         )
                     )
 
@@ -217,7 +258,7 @@ class DiscoveryEngine:
                 if state in {"open", "open|filtered"}:
                     if "udp" not in found_methods:
                         found_methods.append("udp")
-                    services.append(
+                    add_service(
                         ServiceRecord(
                             port=port, protocol="udp", state=state, name=service_name(port)
                         )
@@ -228,7 +269,7 @@ class DiscoveryEngine:
         host = HostRecord(
             ip=target,
             latency_ms=latency,
-            services=services,
+            services=list(services.values()),
             methods=found_methods,
             subnet=_subnet_for(target),
         )
@@ -390,6 +431,40 @@ def _icmp_echo(
     if reply is None:
         return False, None
     return True, (time.perf_counter() - start) * 1000
+
+
+def _tcp_syn_probe(
+    ip: str, port: int, timeout: float, iface: str | None
+) -> tuple[PortState, float | None]:  # pragma: no cover - requires raw sockets
+    from scapy.layers.inet import ICMP, IP, TCP
+    from scapy.sendrecv import send, sr1
+
+    start = time.perf_counter()
+    try:
+        reply = sr1(IP(dst=ip) / TCP(dport=port, flags="S"), timeout=timeout,
+                    iface=iface, verbose=False)
+    except (OSError, PermissionError):
+        return "unknown", None
+    latency = (time.perf_counter() - start) * 1000
+    if reply is None:
+        return "filtered", None
+    if reply.haslayer(TCP):
+        tcp = reply[TCP]
+        flags = int(tcp.flags)
+        if flags & 0x12 == 0x12:  # SYN+ACK
+            with suppress(OSError, PermissionError):
+                send(
+                    IP(dst=ip)
+                    / TCP(sport=int(tcp.dport), dport=port, flags="R", seq=int(tcp.ack)),
+                    iface=iface,
+                    verbose=False,
+                )
+            return "open", latency
+        if flags & 0x14:  # RST or RST+ACK
+            return "closed", latency
+    if reply.haslayer(ICMP):
+        return "filtered", latency
+    return "unknown", latency
 
 
 def _arp_scan(

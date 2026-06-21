@@ -26,6 +26,7 @@ from packetforge.ui.tabs.diagnostics import DiagnosticsTab
 from packetforge.ui.tabs.discovery_center import DiscoveryCenterTab
 from packetforge.ui.tabs.environment import EnvironmentCheckTab
 from packetforge.ui.tabs.fingerprinting import FingerprintingTab
+from packetforge.ui.tabs.history import HistoryTab
 from packetforge.ui.tabs.network_map import NetworkMapTab
 from packetforge.ui.tabs.observability import ObservabilityTab
 from packetforge.ui.tabs.packet_builder import PacketBuilderTab
@@ -69,7 +70,11 @@ class MainWindow(QMainWindow):
         self.simulation_state = SimulationState()
         self.discovery_history = DiscoveryHistory()
         self.dashboard = DashboardTab(self.preset_store)
-        self.discovery_center = DiscoveryCenterTab(self.discovery_state)
+        self.discovery_center = DiscoveryCenterTab(
+            self.discovery_state,
+            history=self.discovery_history,
+            preferences=self.prefs,
+        )
         self.fingerprinting = FingerprintingTab(self.discovery_state)
         self.network_map = NetworkMapTab(self.discovery_state)
         self.protocol_troubleshooter = ProtocolTroubleshooterTab(self.obs_state)
@@ -91,13 +96,10 @@ class MainWindow(QMainWindow):
             "Capture workflows are planned after the first working release. "
             "Use PCAP export from Ping Lab, Packet Builder, or Safe Scapy Console now.",
         )
-        self.history = PlaceholderTab(
-            "History",
-            "Saved run history is planned after the first working release. "
-            "Export JSON, CSV, and PCAP files from active tools now.",
-        )
+        self.history = HistoryTab(self.discovery_state, self.discovery_history)
         self.settings_tab = SettingsTab(self.prefs)
         self.settings_tab.theme_changed.connect(self.apply_theme)
+        self.settings_tab.preferences_changed.connect(self.discovery_center.apply_preferences)
 
         for title, widget in [
             ("Dashboard", self.dashboard),
@@ -130,6 +132,7 @@ class MainWindow(QMainWindow):
         self.network_map.status_message.connect(self.show_status)
         self.ping_lab.status_message.connect(self.show_status)
         self.discovery_center.status_message.connect(self.show_status)
+        self.history.status_message.connect(self.show_status)
         self.simulation_state.changed.connect(self._on_simulation_changed)
 
         self._create_menu()
@@ -204,6 +207,7 @@ class MainWindow(QMainWindow):
             self.simulation: "simulation",
             self.diagnostics: "diagnostics",
             self.environment: "environment",
+            self.history: "history",
             self.settings_tab: "settings",
         }
         HelpDialog.show_for(keys.get(widget, "global"), self)

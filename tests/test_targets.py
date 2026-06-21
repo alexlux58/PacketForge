@@ -4,6 +4,7 @@ from packetforge.engine.targets import (
     is_local_subnet,
     parse_targets,
     preview_targets,
+    validate_host_token,
 )
 
 
@@ -82,3 +83,17 @@ def test_is_local_subnet() -> None:
     assert is_local_subnet("192.168.1.0/24") is True
     assert is_local_subnet("10.0.0.5") is True
     assert is_local_subnet("8.8.8.8") is False
+
+
+def test_validate_host_token_accepts_ip_and_hostname() -> None:
+    assert validate_host_token("192.168.1.1") == (True, "")
+    assert validate_host_token("router.lab.example") == (True, "")
+
+
+def test_validate_host_token_rejects_empty_and_garbage() -> None:
+    ok, message = validate_host_token("")
+    assert ok is False
+    assert "Enter" in message
+    ok, message = validate_host_token("not-an-ip!")
+    assert ok is False
+    assert "Invalid" in message

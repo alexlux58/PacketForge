@@ -147,6 +147,19 @@ def preview_targets(
     return parse_targets(spec, max_targets=max_targets)
 
 
+def validate_host_token(token: str) -> tuple[bool, str]:
+    """Validate a single host/IP/hostname for fingerprint or protocol probes."""
+    cleaned = token.strip()
+    if not cleaned:
+        return False, "Enter an IP address or hostname."
+    result = parse_targets(cleaned, max_targets=1)
+    if result.targets:
+        return True, ""
+    if result.skipped:
+        return False, f"Invalid host: {result.skipped[0]}"
+    return False, "Invalid host input."
+
+
 def is_local_subnet(token: str) -> bool:
     """True when a token is private/link-local (a reasonable ARP-scan candidate)."""
     try:

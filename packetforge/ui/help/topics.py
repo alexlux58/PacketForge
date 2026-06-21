@@ -65,9 +65,9 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         ),
         (
             "Methods",
-            "ICMP and TCP connect work without root. ARP and passive capture need raw-socket "
-            "privileges (sudo on macOS, capabilities on Linux). Disabled methods show "
-            "'needs elevation'.",
+            "TCP connect works without root. ICMP, TCP SYN, ARP, and passive capture need "
+            "raw-socket privileges (sudo on macOS, capabilities on Linux). Disabled methods "
+            "show 'needs elevation'.",
         ),
         (
             "Reading the table",
@@ -83,8 +83,8 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         ),
         (
             "Exports",
-            "CSV/JSON export the host table. PCAP exports packets captured during passive "
-            "monitoring when Record PCAP is enabled.",
+            "CSV/JSON/Markdown export the host table and run report. PCAP exports packets "
+            "captured during passive monitoring when Record PCAP is enabled.",
         ),
     ),
     "fingerprinting": _topic(
@@ -260,7 +260,22 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         (
             "Options",
             "Theme, default scan profile, default interface, remember last tab, and status "
-            "message duration. Changes apply immediately except theme (View menu also works).",
+            "message duration. Discovery defaults update live when you change profile or "
+            "interface here.",
+        ),
+    ),
+    "history": _topic(
+        "history",
+        "Run History",
+        "Locally saved discovery runs for reload and comparison.",
+        (
+            "Automatic saves",
+            "Each completed Discovery Center scan is written to ~/.packetforge/history as JSON.",
+        ),
+        (
+            "Load and compare",
+            "Select a run and load it into the shared discovery state, or compare a saved run "
+            "with the current session to see added/removed hosts and port changes.",
         ),
     ),
     "global": _topic(
