@@ -154,19 +154,26 @@ class FingerprintWorker(QThread):
     error_occurred = Signal(object)
 
     def __init__(
-        self, host: str, *, interface: str | None = None, raw_ok: bool = False
+        self,
+        host: str,
+        *,
+        interface: str | None = None,
+        raw_ok: bool = False,
+        ports: tuple[int, ...] | None = None,
     ) -> None:
         super().__init__()
         self.host = host
         self.interface = interface
         self.raw_ok = raw_ok
+        self.ports = ports
 
     def run(self) -> None:
         _log.info("fingerprint started: host=%s raw_ok=%s", self.host, self.raw_ok)
         try:
-            evidence: FingerprintEvidence = fingerprint_host(
-                self.host, interface=self.interface, raw_ok=self.raw_ok
-            )
+            kwargs: dict[str, object] = {"interface": self.interface, "raw_ok": self.raw_ok}
+            if self.ports:
+                kwargs["ports"] = self.ports
+            evidence: FingerprintEvidence = fingerprint_host(self.host, **kwargs)  # type: ignore[arg-type]
             _log.info("fingerprint finished: host=%s", self.host)
             self.completed.emit(evidence)
         except Exception as exc:

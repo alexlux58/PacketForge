@@ -25,8 +25,8 @@ def gather_observations(
     Unprivileged path: banner grabbing over TCP connect.
     Privileged path (raw sockets): adds ICMP TTL and TCP SYN option signals.
     """
-    observations = FingerprintObservations(host=host)
-    observations.banners = _grab_banners(host, ports, timeout)
+    observations = FingerprintObservations(host=host, raw_signals_available=raw_ok)
+    observations.banners, observations.connect_results = _grab_banners(host, ports, timeout)
     if raw_ok:
         _add_raw_signals(observations, host, timeout, interface, ports)
     return observations
@@ -46,8 +46,12 @@ def fingerprint_host(
     return score_fingerprint(observations)
 
 
-def _grab_banners(host: str, ports: tuple[int, ...], timeout: float) -> dict[str, str]:
+def _grab_banners(
+    host: str, ports: tuple[int, ...], timeout: float
+) -> tuple[dict[str, str], dict[int, str]]:
+    """Connect to each port, capturing banners and the outcome of every attempt."""
     banners: dict[str, str] = {}
+    results: dict[int, str] = {}
     for port in ports:
         try:
             with socket.create_connection((host, port), timeout=timeout) as sock:
@@ -55,12 +59,22 @@ def _grab_banners(host: str, ports: tuple[int, ...], timeout: float) -> dict[str
                 if port in {80, 443, 8080}:
                     sock.sendall(b"HEAD / HTTP/1.0\r\n\r\n")
                 data = sock.recv(256)
-        except OSError:
+        except ConnectionRefusedError:
+            results[port] = "connection refused"
+            continue
+        except TimeoutError:
+            results[port] = "timeout / filtered"
+            continue
+        except OSError as exc:
+            results[port] = f"error: {type(exc).__name__}"
             continue
         text = data.decode("latin-1", errors="replace").strip()
         if text:
             banners[_port_label(port)] = text
-    return banners
+            results[port] = "open (banner)"
+        else:
+            results[port] = "open (no banner)"
+    return banners, results
 
 
 def _port_label(port: int) -> str:

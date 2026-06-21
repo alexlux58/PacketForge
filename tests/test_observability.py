@@ -152,6 +152,26 @@ def test_build_topology_nodes_and_edges() -> None:
     assert passive_edge.kind == "passive"
 
 
+def test_build_topology_groups_by_scanned_22_not_24() -> None:
+    # Regression: a /22 scan used to be mislabeled as /24 in the topology.
+    hosts = [
+        _host("192.168.4.10", subnet="192.168.4.0/22"),
+        _host("192.168.5.20", subnet="192.168.4.0/22"),
+    ]
+    graph = build_topology(hosts, scan_targets="192.168.4.0/22")
+    assert graph.groups == ["192.168.4.0/22"]
+    assert "192.168.4.0/24" not in graph.groups
+    group_node = next(n for n in graph.nodes if n.id == "group:192.168.4.0/22")
+    assert group_node.label == "192.168.4.0/22 (2)"
+
+
+def test_build_topology_scan_targets_override_stale_subnet() -> None:
+    # Even if a host carries a stale /24 subnet, the scanned /22 wins.
+    hosts = [_host("192.168.5.20", subnet="192.168.5.0/24")]
+    graph = build_topology(hosts, scan_targets="192.168.4.0/22")
+    assert graph.groups == ["192.168.4.0/22"]
+
+
 def test_build_topology_group_by_protocol() -> None:
     hosts = [
         _host("10.0.0.1", services=[ServiceRecord(port=80, state="open", name="http")]),

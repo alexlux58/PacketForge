@@ -18,10 +18,14 @@ COMMON_OIDS: dict[str, str] = {
 }
 
 
+# Scapy SNMP version field encoding (ASN.1 enum): v1 -> 0, v2c -> 1.
+_SNMP_VERSION_CODES: dict[str, int] = {"v1": 0, "v2c": 1}
+
+
 @dataclass
 class SnmpProbe:
     host: str
-    version: str = "v2c"  # "v2c" or "v3"
+    version: str = "v2c"  # "v1", "v2c", or "v3"
     community: str = ""  # user-supplied; never guessed
     v3_username: str = ""
     port: int = 161
@@ -32,6 +36,13 @@ class SnmpProbe:
 def get(config: SnmpProbe) -> ProtocolProbeResult:
     if config.version == "v3":
         return _v3_unsupported(config)
+    if config.version not in _SNMP_VERSION_CODES:
+        return ProtocolProbeResult(
+            protocol="SNMP",
+            target=config.host,
+            success=False,
+            summary=f"unsupported SNMP version {config.version!r} (use v1, v2c, or v3)",
+        )
     if not config.community:
         return ProtocolProbeResult(
             protocol="SNMP",
@@ -40,15 +51,19 @@ def get(config: SnmpProbe) -> ProtocolProbeResult:
             summary="no community string supplied (PacketForge never guesses communities)",
             warnings=["Provide the read-only community you are authorized to use."],
         )
-    return _get_v2c(config)
+    return _get_community(config)
 
 
-def _get_v2c(config: SnmpProbe) -> ProtocolProbeResult:
+def _get_community(config: SnmpProbe) -> ProtocolProbeResult:
     from scapy.asn1.asn1 import ASN1_OID
     from scapy.layers.snmp import SNMP, SNMPget, SNMPvarbind
 
     varbinds = [SNMPvarbind(oid=ASN1_OID(oid)) for oid in config.oids.values()]
-    request = SNMP(community=config.community, PDU=SNMPget(varbindlist=varbinds))
+    request = SNMP(
+        version=_SNMP_VERSION_CODES[config.version],
+        community=config.community,
+        PDU=SNMPget(varbindlist=varbinds),
+    )
     start = time.perf_counter()
     try:
         raw = udp_query(bytes(request), config.host, config.port, config.timeout_s)

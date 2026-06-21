@@ -9,7 +9,9 @@ from contextlib import suppress
 from datetime import UTC, datetime
 
 from packetforge.engine.merge import upsert_host
+from packetforge.engine.subnets import IPNetwork, parse_scan_networks, subnet_for_ip
 from packetforge.engine.targets import is_local_subnet, parse_targets
+from packetforge.errors import classify_exception
 from packetforge.models.discovery import (
     DiscoveryConfig,
     DiscoveryMethod,
@@ -67,6 +69,7 @@ class DiscoveryEngine:
         self._lock = threading.Lock()
         self._done = 0
         self._total = 0
+        self._scan_networks: list[IPNetwork] = []
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -98,6 +101,7 @@ class DiscoveryEngine:
         log = on_log or (lambda _message: None)
         profile = profile_by_name(config.profile_name)
         limiter = RateLimiter(profile.max_packets_per_second)
+        self._scan_networks = parse_scan_networks(config.targets)
         parsed = parse_targets(config.targets, max_targets=config.max_targets)
         for warning in parsed.warnings:
             log(warning)
@@ -171,12 +175,20 @@ class DiscoveryEngine:
             if self.stop_event.is_set():
                 return
             self._wait_if_paused()
-            self._probe_target(target, methods, config, profile, limiter, raw_ok, on_host, log)
-            with self._lock:
-                self._done += 1
-                done = self._done
-            if on_progress is not None:
-                on_progress(done, self._total)
+            try:
+                self._probe_target(
+                    target, methods, config, profile, limiter, raw_ok, on_host, log
+                )
+            except Exception as exc:
+                # One bad target must never abort the whole scan; classify and log it.
+                event = classify_exception(exc, source="Discovery Center", operation="probe")
+                log(f"Probe error on {target}: {event.message} [{event.detail}]")
+            finally:
+                with self._lock:
+                    self._done += 1
+                    done = self._done
+                if on_progress is not None:
+                    on_progress(done, self._total)
             if profile.inter_target_delay_ms:
                 time.sleep(profile.inter_target_delay_ms / 1000)
 
@@ -271,7 +283,7 @@ class DiscoveryEngine:
             latency_ms=latency,
             services=list(services.values()),
             methods=found_methods,
-            subnet=_subnet_for(target),
+            subnet=subnet_for_ip(target, self._scan_networks),
         )
         self._record(host, on_host)
 
@@ -297,7 +309,10 @@ class DiscoveryEngine:
             log(f"ARP scan unavailable: {exc}")
             return
         for ip, mac in entries.items():
-            host = HostRecord(ip=ip, mac=mac, methods=["arp"], subnet=_subnet_for(ip))
+            host = HostRecord(
+                ip=ip, mac=mac, methods=["arp"],
+                subnet=subnet_for_ip(ip, self._scan_networks),
+            )
             self._record(host, on_host)
 
     def _run_reverse_dns(
@@ -312,7 +327,7 @@ class DiscoveryEngine:
             if hostname:
                 host = HostRecord(
                     ip=target, hostname=hostname, methods=["dns_reverse"],
-                    subnet=_subnet_for(target),
+                    subnet=subnet_for_ip(target, self._scan_networks),
                 )
                 self._record(host, on_host)
 
@@ -331,7 +346,7 @@ class DiscoveryEngine:
         log(f"Passive capture for {config.passive_seconds}s...")
         try:
             hosts, packets = _passive_capture(
-                config.interface, config.passive_seconds, self.stop_event
+                config.interface, config.passive_seconds, self.stop_event, self._scan_networks
             )
         except Exception as exc:  # pragma: no cover - depends on host privileges
             log(f"Passive capture unavailable: {exc}")
@@ -340,18 +355,6 @@ class DiscoveryEngine:
             self.captured_packets.extend(packets)
         for host in hosts:
             self._record(host, on_host)
-
-
-def _subnet_for(ip: str) -> str | None:
-    import ipaddress
-
-    try:
-        addr = ipaddress.ip_address(ip)
-    except ValueError:
-        return None
-    if isinstance(addr, ipaddress.IPv4Address):
-        return str(ipaddress.ip_network(f"{ip}/24", strict=False))
-    return str(ipaddress.ip_network(f"{ip}/64", strict=False))
 
 
 def _utcnow() -> datetime:
@@ -486,11 +489,16 @@ def _arp_scan(
 
 
 def _passive_capture(
-    iface: str | None, seconds: int, stop_event: threading.Event
+    iface: str | None,
+    seconds: int,
+    stop_event: threading.Event,
+    scan_networks: list[IPNetwork] | None = None,
 ) -> tuple[list[HostRecord], list[object]]:  # pragma: no cover - requires raw sockets
     from scapy.layers.inet import IP
     from scapy.layers.l2 import ARP
     from scapy.sendrecv import sniff
+
+    scan_networks = scan_networks or []
 
     packets = sniff(
         iface=iface,
@@ -511,7 +519,8 @@ def _passive_capture(
             current = seen.get(ip)
             if current is None:
                 seen[ip] = HostRecord(
-                    ip=ip, mac=mac, methods=["passive"], subnet=_subnet_for(ip)
+                    ip=ip, mac=mac, methods=["passive"],
+                    subnet=subnet_for_ip(ip, scan_networks),
                 )
             elif mac and not current.mac:
                 seen[ip] = current.model_copy(update={"mac": mac})

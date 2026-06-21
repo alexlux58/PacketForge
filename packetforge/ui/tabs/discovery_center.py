@@ -71,6 +71,16 @@ _COLUMNS = [
     "Protocols", "Confidence", "Methods", "Last seen",
 ]
 
+# Keep identity columns wide enough that full IPs/MACs/hostnames stay readable
+# instead of collapsing to "192.168..." after resizeColumnsToContents().
+_MIN_COLUMN_WIDTHS: dict[int, int] = {
+    0: 140,  # IP
+    1: 150,  # MAC
+    2: 120,  # Vendor
+    3: 160,  # Hostname
+    5: 110,  # Open ports
+}
+
 _FIELD_TOOLTIPS: dict[str, str] = {
     "Targets": "IP, CIDR, comma list, range, or hostname. Example: 192.168.1.0/24",
     "Interface": "Outbound interface for probes and passive capture. Leave blank for auto.",
@@ -98,6 +108,7 @@ class DiscoveryCenterTab(QWidget):
         self.prefs = preferences or AppPreferences()
         self.history = history or DiscoveryHistory()
         self._row_for_ip: dict[str, int] = {}
+        self._last_packets: list[object] = []
 
         root = QVBoxLayout(self)
         root.addWidget(
@@ -142,6 +153,15 @@ class DiscoveryCenterTab(QWidget):
         right = QVBoxLayout(panel)
         right.setContentsMargins(0, 0, 0, 0)
 
+        self.scope_label = QLabel("No scan running.")
+        self.scope_label.setObjectName("Metric")
+        self.scope_label.setWordWrap(True)
+        right.addWidget(self.scope_label)
+        self.methods_label = QLabel("")
+        self.methods_label.setObjectName("Muted")
+        self.methods_label.setWordWrap(True)
+        right.addWidget(self.methods_label)
+
         self.mini_reach = QLabel("Reachability: no hosts yet.")
         self.mini_reach.setObjectName("Muted")
         right.addWidget(self.mini_reach)
@@ -160,6 +180,7 @@ class DiscoveryCenterTab(QWidget):
             _COLUMNS,
             empty_message="No hosts discovered yet.",
             empty_hint="Configure targets and click Start, or load a Simulation scenario.",
+            min_column_widths=_MIN_COLUMN_WIDTHS,
         )
         self.host_table.set_export_handler(self.save_csv)
         self.host_table.row_activated.connect(self._show_host_detail)
@@ -221,11 +242,18 @@ class DiscoveryCenterTab(QWidget):
         methods_layout = QVBoxLayout(methods_box)
         for method, label in _METHOD_LABELS:
             checkbox = QCheckBox(label)
-            if method in {"icmp", "tcp"}:
-                checkbox.setChecked(True)
             if method in PRIVILEGED_METHODS and not self.privileges.raw_sockets:
-                checkbox.setText(f"{label} (needs elevation)")
-                checkbox.setToolTip("Requires raw sockets — run with sudo or grant capabilities.")
+                # Grey out raw-socket methods up front so the limitation is visible
+                # before starting, not just buried in the logs after the fact.
+                checkbox.setText(f"{label} — needs elevation")
+                checkbox.setToolTip(
+                    "Requires raw sockets. Run with sudo (macOS) or grant cap_net_raw "
+                    "(Linux) to enable; disabled because this process is unprivileged."
+                )
+                checkbox.setChecked(False)
+                checkbox.setEnabled(False)
+            elif method in {"icmp", "tcp"}:
+                checkbox.setChecked(True)
             self.method_boxes[method] = checkbox
             methods_layout.addWidget(checkbox)
 
@@ -400,6 +428,8 @@ class DiscoveryCenterTab(QWidget):
             return
         self.clear()
         self.host_table.begin_bulk_update()
+        self.scope_label.setText(f"Scanning {config.targets} ({parsed.count} host(s))")
+        self._update_methods_label(methods)
         self.progress_label.setText("Starting scan...")
         self.status_message.emit(f"Discovery started: {config.targets}")
         self.worker = DiscoveryWorker(config)
@@ -430,13 +460,33 @@ class DiscoveryCenterTab(QWidget):
     def clear(self) -> None:
         self.host_table.clear_rows()
         self._row_for_ip.clear()
+        self._last_packets = []
         self.progress.setValue(0)
         self.progress_label.setText("Idle")
+        self.scope_label.setText("No scan running.")
+        self.methods_label.setText("")
         self.log.clear()
         self.host_detail.clear()
         self.state.clear()
 
+    def _update_methods_label(self, methods: list[DiscoveryMethod]) -> None:
+        label_map = dict(_METHOD_LABELS)
+        running = [label_map.get(method, method) for method in methods]
+        parts = [f"Running: {', '.join(running)}"] if running else []
+        if not self.privileges.raw_sockets:
+            unavailable = [
+                label_map[method]
+                for method, _ in _METHOD_LABELS
+                if method in PRIVILEGED_METHODS
+            ]
+            parts.append(f"Unavailable without elevation: {', '.join(unavailable)}")
+        self.methods_label.setText(" · ".join(parts))
+
     def _on_host(self, host: HostRecord) -> None:
+        # A successful host while the scan is still running means any earlier
+        # transient probe error is stale — don't leave a red banner up.
+        if self.worker is not None and self.worker.isRunning():
+            self.error_banner.clear()
         self.state.upsert(host, notify=False)
         self._render_host(host)
         self._mini_timer.start()
@@ -449,6 +499,9 @@ class DiscoveryCenterTab(QWidget):
     def _on_completed(self, run: DiscoveryRun) -> None:
         self.host_table.end_bulk_update()
         self.host_table.resize_columns_to_contents()
+        # Capture packets now so PCAP export survives the worker being replaced.
+        if self.worker is not None:
+            self._last_packets = list(self.worker.captured_packets)
         self.state.set_run(run)
         try:
             self.history.save(run)
@@ -584,7 +637,7 @@ class DiscoveryCenterTab(QWidget):
             self.status_message.emit(f"Exported {len(hosts)} host(s) to Markdown")
 
     def save_pcap(self) -> None:
-        packets = self.worker.captured_packets if self.worker else []
+        packets = self._last_packets or (self.worker.captured_packets if self.worker else [])
         if not packets:
             QMessageBox.information(
                 self, "No packets", "Enable passive capture with Record PCAP to collect packets."

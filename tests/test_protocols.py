@@ -57,6 +57,35 @@ def test_snmp_v3_reports_unsupported_without_sending() -> None:
     assert any("brute force" in warning.lower() for warning in result.warnings)
 
 
+def test_snmp_v1_also_requires_community() -> None:
+    result = snmp.get(snmp.SnmpProbe(host="10.0.0.1", version="v1", community=""))
+    assert result.success is False
+    assert "never guesses" in result.summary.lower()
+
+
+def test_snmp_v1_uses_community_get(
+    monkeypatch: pytest.MonkeyPatch, snmp_response_bytes
+) -> None:  # type: ignore[no-untyped-def]
+    captured: dict[str, int] = {}
+
+    def fake_udp(payload: bytes, host: str, port: int, timeout: float) -> bytes:
+        from scapy.layers.snmp import SNMP
+
+        captured["version"] = int(SNMP(payload).version.val)
+        return snmp_response_bytes()
+
+    monkeypatch.setattr(snmp, "udp_query", fake_udp)
+    result = snmp.get(snmp.SnmpProbe(host="10.0.0.1", version="v1", community="public"))
+    assert result.success is True
+    assert captured["version"] == 0  # ASN.1 enum: v1 -> 0
+
+
+def test_snmp_unknown_version_is_rejected() -> None:
+    result = snmp.get(snmp.SnmpProbe(host="10.0.0.1", version="v9", community="public"))
+    assert result.success is False
+    assert "unsupported snmp version" in result.summary.lower()
+
+
 def test_dhcp_discover_blocked_without_lab_mode() -> None:
     result = dhcp.discover(dhcp.DhcpDiscoverProbe(lab_mode=False))
     assert result.success is False

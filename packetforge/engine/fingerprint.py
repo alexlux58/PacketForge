@@ -32,6 +32,11 @@ class FingerprintObservations:
     tcp_timestamps: bool | None = None
     icmp_echo_reply: bool | None = None
     banners: dict[str, str] = field(default_factory=dict)
+    # Per-port TCP connect outcome (e.g. {22: "open (banner)", 80: "connection refused"}).
+    # Recorded even on failure so the UI can show what was attempted, never a blank table.
+    connect_results: dict[int, str] = field(default_factory=dict)
+    # False when running unprivileged: only TCP connect / banner grabbing were possible.
+    raw_signals_available: bool = False
 
 
 def infer_initial_ttl(observed: int) -> int | None:
@@ -54,6 +59,8 @@ def score_fingerprint(observations: FingerprintObservations) -> FingerprintEvide
     total_weight += _score_tcp_options(observations, signals, votes)
     total_weight += _score_icmp(observations, signals, votes)
     total_weight += _score_banners(observations, signals, votes)
+    _record_connectivity(observations, signals)
+    _record_privilege_note(observations, signals)
 
     guesses = _rank(votes)
     confidence = _confidence(guesses, total_weight)
@@ -254,6 +261,58 @@ def _score_banners(
         )
         accumulated += weight
     return accumulated
+
+
+def _record_connectivity(
+    obs: FingerprintObservations, signals: list[FingerprintSignal]
+) -> None:
+    """Add zero-weight evidence rows for every port probed, including failures.
+
+    These do not move the OS vote, but they ensure the evidence table shows what
+    was attempted (e.g. "port 22: connection refused") rather than nothing at all
+    when banners and raw signals are unavailable.
+    """
+    for port in sorted(obs.connect_results):
+        outcome = obs.connect_results[port]
+        signals.append(
+            FingerprintSignal(
+                name=f"TCP {port}",
+                value=outcome,
+                interpretation=_connectivity_interpretation(outcome),
+                weight=0.0,
+                source="service",
+            )
+        )
+
+
+def _connectivity_interpretation(outcome: str) -> str:
+    lowered = outcome.lower()
+    if "banner" in lowered and "no banner" not in lowered:
+        return "open; banner captured for analysis"
+    if "no banner" in lowered:
+        return "open but returned no banner to fingerprint"
+    if "refused" in lowered:
+        return "port closed (connection refused) — host is up but not serving here"
+    if "timeout" in lowered or "filtered" in lowered:
+        return "no response (filtered or host down)"
+    return "probe outcome recorded"
+
+
+def _record_privilege_note(
+    obs: FingerprintObservations, signals: list[FingerprintSignal]
+) -> None:
+    if obs.raw_signals_available:
+        return
+    signals.append(
+        FingerprintSignal(
+            name="Privilege",
+            value="unprivileged",
+            interpretation="Raw TTL/TCP SYN/ICMP signals require elevation; only TCP "
+            "connect and banner grabbing were used. Run elevated for stronger evidence.",
+            weight=0.0,
+            source="fingerprint",
+        )
+    )
 
 
 def _rank(votes: dict[str, float]) -> list[OsGuess]:

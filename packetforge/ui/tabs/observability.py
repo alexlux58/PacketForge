@@ -508,7 +508,10 @@ class ObservabilityTab(QWidget):
             from packetforge.engine.observability import _subnet_of
 
             hosts = [h for h in hosts if (h.subnet or _subnet_of(h.ip)) == subnet]
-        graph = build_topology(hosts, group_by=group_by)
+        scan_targets = (
+            self.discovery_state.last_run.targets if self.discovery_state.last_run else None
+        )
+        graph = build_topology(hosts, group_by=group_by, scan_targets=scan_targets)
         self.topology_view.set_graph(graph)
         self.topology_view.reset_view()
 
