@@ -88,11 +88,15 @@ Python-native libraries for packet construction, transmission, inspection, and P
 PacketForge targets local desktop use on **macOS** and **Linux** with Python 3.12+.
 
 ```bash
-python3.12 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"      # editable development install
-packetforge                  # launch the GUI (console entry point)
+pip install -U pip
+pip install -e ".[dev]"
+packetforge
 ```
+
+If `python3 --version` is below 3.12, install Python 3.12+ first (e.g. `brew install python@3.12`).
+Run each line separately — do not paste inline comments into the shell.
 
 The editable install above is the supported development workflow and is **not** affected by the
 packaging steps below. You can also launch with `python -m packetforge.main`.
