@@ -7,7 +7,7 @@ name = "packetforge"
 version = "0.1.0"
 description = "A local desktop packet crafting and diagnostics workbench powered by Scapy."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
 authors = [{ name = "PacketForge Contributors" }]
 keywords = ["networking", "scapy", "pyside6", "discovery", "diagnostics", "pcap"]
@@ -22,6 +22,7 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: System :: Networking :: Monitoring",
   "Topic :: System :: Networking",
 ]

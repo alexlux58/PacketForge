@@ -18,6 +18,7 @@ from packetforge.engine.observability import build_topology
 from packetforge.models.observability import TopologyEdge, TopologyGraph, TopologyNode
 from packetforge.ui.state import DiscoveryState
 from packetforge.ui.widgets.host_detail import HostDetailPanel
+from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.widgets.persistent_splitter import PersistentSplitter
 from packetforge.ui.widgets.topology_view import TopologyView
 
@@ -31,17 +32,16 @@ class NetworkMapTab(QWidget):
         self.graph = TopologyGraph()
 
         root = QVBoxLayout(self)
-        title = QLabel("Network Map")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-        note = QLabel(
-            "Interactive topology from discovered hosts. Scroll to zoom, drag to pan. "
-            "Click a node for host detail; click an edge to see its evidence "
-            "(ARP, passive capture, latency, reverse DNS)."
+        root.addWidget(
+            PageHeader(
+                "Network Map",
+                "network_map",
+                subtitle=(
+                    "Interactive topology from discovered hosts. Scroll to zoom, drag to pan. "
+                    "Click i for help with grouping, edges, and clearing the map."
+                ),
+            )
         )
-        note.setObjectName("Muted")
-        note.setWordWrap(True)
-        root.addWidget(note)
 
         controls = QHBoxLayout()
         root.addLayout(controls)
@@ -52,10 +52,16 @@ class NetworkMapTab(QWidget):
         controls.addWidget(self.group_by)
         self.refresh_button = QPushButton("Rebuild map")
         self.reset_button = QPushButton("Reset view")
+        self.reset_button.setToolTip("Reset zoom and pan on the current map.")
+        self.clear_button = QPushButton("Clear map")
+        self.clear_button.setToolTip(
+            "Remove all discovered hosts from the map and shared discovery state."
+        )
         self.export_json_button = QPushButton("Export JSON")
         self.export_image_button = QPushButton("Export image")
         controls.addWidget(self.refresh_button)
         controls.addWidget(self.reset_button)
+        controls.addWidget(self.clear_button)
         controls.addWidget(self.export_json_button)
         controls.addWidget(self.export_image_button)
         controls.addStretch(1)
@@ -82,6 +88,7 @@ class NetworkMapTab(QWidget):
 
         self.refresh_button.clicked.connect(self.rebuild)
         self.reset_button.clicked.connect(self.view.reset_view)
+        self.clear_button.clicked.connect(self.clear_map)
         self.export_json_button.clicked.connect(self.export_json)
         self.export_image_button.clicked.connect(self.export_image)
         self.view.node_clicked.connect(self._show_node)
@@ -103,6 +110,26 @@ class NetworkMapTab(QWidget):
             self.summary.setText("No hosts yet — run Discovery or load Simulation data.")
             self.host_detail.clear()
             self.edge_detail.setText("")
+
+    def clear_map(self) -> None:
+        if not self.state.hosts():
+            self.view.reset_view()
+            self.host_detail.clear()
+            self.edge_detail.setText("")
+            self.status_message.emit("Network map is already empty.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Clear network map",
+            "Remove all discovered hosts from the map?\n\n"
+            "This also clears Discovery Center and Fingerprinting host lists.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.state.clear()
+        self.status_message.emit("Network map cleared.")
 
     def _show_node(self, node: TopologyNode) -> None:
         host = self.state.get(node.ip or "")

@@ -43,6 +43,7 @@ from packetforge.models.observability import (
 )
 from packetforge.ui import charts
 from packetforge.ui.state import DiscoveryState, ObservabilityState
+from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.widgets.topology_view import TopologyView
 from packetforge.ui.workers import ObservabilityWorker
 
@@ -92,16 +93,16 @@ class ObservabilityTab(QWidget):
         self._debounce.timeout.connect(self._recompute)
 
         root = QVBoxLayout(self)
-        title = QLabel("Observability")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-        intro = QLabel(
-            "Turns discovery, fingerprint, ping, and protocol-probe data into troubleshooting "
-            "visuals. Charts answer a specific question; anomaly cards always cite their evidence."
+        root.addWidget(
+            PageHeader(
+                "Observability",
+                "observability",
+                subtitle=(
+                    "Charts from discovery, ping, and protocol data. Load sample data to "
+                    "explore without scanning. Click i for tab-by-tab guidance."
+                ),
+            )
         )
-        intro.setObjectName("Muted")
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
         root.addLayout(self._build_filter_bar())
 

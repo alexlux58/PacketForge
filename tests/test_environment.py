@@ -29,6 +29,13 @@ def test_python_version_check_fails_when_too_old(monkeypatch: pytest.MonkeyPatch
     assert result.hint
 
 
+def test_python_version_check_fails_when_too_new(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(environment, "MAX_PYTHON", (3, 12))
+    result = check_python_version()
+    assert result.status == "fail"
+    assert "PySide6" in result.hint
+
+
 def test_interfaces_check_ok_when_present() -> None:
     result = check_interfaces(["en0", "lo0"])
     assert result.status == "ok"

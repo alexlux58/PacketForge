@@ -21,6 +21,8 @@ from typing import Literal
 CheckStatus = Literal["ok", "warning", "fail"]
 
 MIN_PYTHON: tuple[int, int] = (3, 12)
+# PySide6 platform plugins (cocoa/xcb) fail to initialize on Python 3.14+ as of 6.11.
+MAX_PYTHON: tuple[int, int] = (3, 14)
 
 
 @dataclass(frozen=True)
@@ -66,14 +68,35 @@ class EnvironmentReport:
 def check_python_version() -> CheckResult:
     current = sys.version_info[:3]
     text = ".".join(str(part) for part in current)
-    if current[:2] >= MIN_PYTHON:
-        return CheckResult("Python version", "ok", f"Python {text}")
-    return CheckResult(
-        "Python version",
-        "fail",
-        f"Python {text} is too old",
-        f"PacketForge requires Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer.",
-    )
+    if current[:2] < MIN_PYTHON:
+        return CheckResult(
+            "Python version",
+            "fail",
+            f"Python {text} is too old",
+            f"PacketForge requires Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer.",
+        )
+    if current[:2] >= MAX_PYTHON:
+        return CheckResult(
+            "Python version",
+            "fail",
+            f"Python {text} is not supported yet",
+            (
+                f"Use Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} through "
+                f"{MAX_PYTHON[0]}.{MAX_PYTHON[1] - 1}. PySide6 GUI plugins fail on "
+                f"Python {MAX_PYTHON[0]}.{MAX_PYTHON[1]}+. On macOS: "
+                f"'brew install python@3.12' then 'python3.12 -m venv .venv'."
+            ),
+        )
+    return CheckResult("Python version", "ok", f"Python {text}")
+
+
+def ensure_supported_python() -> None:
+    """Exit early with a helpful message before importing PySide6."""
+    result = check_python_version()
+    if result.status != "fail":
+        return
+    sys.stderr.write(f"{result.detail}\n{result.hint}\n")
+    raise SystemExit(1)
 
 
 def check_scapy() -> CheckResult:

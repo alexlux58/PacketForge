@@ -19,6 +19,7 @@ from packetforge.engine.environment import (
     EnvironmentReport,
     run_environment_checks,
 )
+from packetforge.ui.widgets.page_header import PageHeader
 
 _STATUS_TEXT = {"ok": "OK", "warning": "WARN", "fail": "FAIL"}
 _STATUS_COLOR = {"ok": "#36c275", "warning": "#e0b400", "fail": "#ff6b5e"}
@@ -34,17 +35,16 @@ class EnvironmentCheckTab(QWidget):
         super().__init__()
 
         root = QVBoxLayout(self)
-        title = QLabel("Environment Check")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-
-        intro = QLabel(
-            "PacketForge runs these checks on first launch and whenever you click Re-run. "
-            "They never send packets to the network or require elevated privileges."
+        root.addWidget(
+            PageHeader(
+                "Environment Check",
+                "environment",
+                subtitle=(
+                    "Verifies Python, Scapy, PySide6, interfaces, privileges, and PCAP write. "
+                    "No network traffic. Click i for fixing failed checks."
+                ),
+            )
         )
-        intro.setObjectName("Muted")
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
         self.summary = QLabel()
         self.summary.setObjectName("Metric")

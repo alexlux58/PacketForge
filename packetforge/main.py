@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from packetforge.app import run
+from packetforge.engine.environment import ensure_supported_python
 
 
 def main() -> int:
+    ensure_supported_python()
+    from packetforge.app import run
+
     return run()
 
 

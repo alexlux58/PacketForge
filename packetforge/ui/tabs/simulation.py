@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 from packetforge.diagnostics import get_logger
 from packetforge.engine.simulation import build_scenario, list_scenarios
 from packetforge.ui.state import DiscoveryState, ObservabilityState, SimulationState
+from packetforge.ui.widgets.page_header import PageHeader
 
 _log = get_logger("simulation")
 
@@ -37,18 +38,16 @@ class SimulationTab(QWidget):
         self.sim_state = sim_state
 
         root = QVBoxLayout(self)
-        title = QLabel("Simulation Mode")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-
-        intro = QLabel(
-            "Populate Discovery, Fingerprinting, Network Map, Protocol Troubleshooter, and "
-            "Observability with realistic fake data - no packets are sent. Use it for demos, "
-            "screenshots, development, and validating troubleshooting workflows."
+        root.addWidget(
+            PageHeader(
+                "Simulation Mode",
+                "simulation",
+                subtitle=(
+                    "Fake network data for demos and UI testing — no packets sent. "
+                    "Click i for scope and clearing instructions."
+                ),
+            )
         )
-        intro.setObjectName("Muted")
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
         self.banner = QLabel()
         self.banner.setObjectName("SimulationBanner")

@@ -21,9 +21,10 @@ class DiscoveryState(QObject):
         self._hosts: dict[str, HostRecord] = {}
         self.last_run: DiscoveryRun | None = None
 
-    def upsert(self, host: HostRecord) -> HostRecord:
+    def upsert(self, host: HostRecord, *, notify: bool = True) -> HostRecord:
         merged = upsert_host(self._hosts, host)
-        self.hosts_changed.emit()
+        if notify:
+            self.hosts_changed.emit()
         return merged
 
     def set_run(self, run: DiscoveryRun) -> None:

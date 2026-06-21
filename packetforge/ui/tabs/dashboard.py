@@ -4,7 +4,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
-    QLabel,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -14,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from packetforge.engine.builder import generate_scapy_code
 from packetforge.presets.storage import PresetStore
+from packetforge.ui.widgets.page_header import PageHeader
 
 
 class DashboardTab(QWidget):
@@ -25,14 +25,15 @@ class DashboardTab(QWidget):
         self.presets = self.preset_store.all_presets()
 
         layout = QVBoxLayout(self)
-        title = QLabel("PacketForge")
-        title.setObjectName("PageTitle")
-        subtitle = QLabel(
-            "Authorized packet crafting, ping diagnostics, safe Scapy, and PCAP export."
+        layout.addWidget(
+            PageHeader(
+                "PacketForge",
+                "dashboard",
+                subtitle=(
+                    "Authorized packet crafting, ping diagnostics, safe Scapy, and PCAP export."
+                ),
+            )
         )
-        subtitle.setObjectName("Muted")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
 
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Category", "Preset", "Use", "Layers", "Scapy"])

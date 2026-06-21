@@ -2,19 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
     QFileDialog,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
     QPushButton,
-    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -22,10 +17,12 @@ from PySide6.QtWidgets import (
 from scapy.packet import Packet
 
 from packetforge.engine.builder import packet_details, packet_hexdump, packet_summary
-from packetforge.engine.interfaces import list_interfaces
 from packetforge.engine.sender import SendFunction, SendOptions
 from packetforge.security.safe_scapy import SafeScapyError, parse_scapy_expression
 from packetforge.ui.widgets.error_banner import ErrorBanner
+from packetforge.ui.widgets.page_header import PageHeader
+from packetforge.ui.widgets.persistent_splitter import PersistentSplitter
+from packetforge.ui.widgets.transmission_form import TransmissionControls, build_transmission_group
 from packetforge.ui.workers import SendWorker
 from packetforge.utils.export import export_packets_to_pcap
 
@@ -37,29 +34,49 @@ class SafeConsoleTab(QWidget):
         super().__init__()
         self.packet: Packet | None = None
         self.send_workers: list[SendWorker] = []
+        self.tx: TransmissionControls
 
         root = QVBoxLayout(self)
-        title = QLabel("Safe Scapy Console")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
+        root.addWidget(
+            PageHeader(
+                "Safe Scapy Console",
+                "scapy_console",
+                subtitle=(
+                    "Restricted Scapy expressions only - validate before send. "
+                    "Click i for syntax help."
+                ),
+            )
+        )
 
         self.error_banner = ErrorBanner()
         root.addWidget(self.error_banner)
 
-        body = QHBoxLayout()
-        root.addLayout(body, 1)
+        splitter = PersistentSplitter(
+            Qt.Orientation.Horizontal,
+            "splitter/scapy_console",
+            default_sizes=[560, 440],
+        )
+        splitter.addWidget(self._build_editor_panel())
+        splitter.addWidget(self._build_output_panel())
+        splitter.restore()
+        root.addWidget(splitter, 1)
 
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
+    def _build_editor_panel(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+
         self.expression = QPlainTextEdit(
             'IP(dst="192.168.1.1", ttl=64) / ICMP() / Raw(load=b"PacketForge")'
         )
         self.expression.setFont(QFont("Menlo", 12))
-        left_layout.addWidget(self.expression, 1)
+        layout.addWidget(self.expression, 1)
+
         self.error_label = QLabel()
         self.error_label.setObjectName("Error")
         self.error_label.setWordWrap(True)
-        left_layout.addWidget(self.error_label)
+        layout.addWidget(self.error_label)
+
         actions = QHBoxLayout()
         for text, callback in [
             ("Validate", self.validate_expression),
@@ -71,12 +88,19 @@ class SafeConsoleTab(QWidget):
             button = QPushButton(text)
             button.clicked.connect(callback)
             actions.addWidget(button)
-        left_layout.addLayout(actions)
-        body.addWidget(left, 1)
+        actions.addStretch(1)
+        layout.addLayout(actions)
+        return panel
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.addWidget(self._transmission_box())
+    def _build_output_panel(self) -> QWidget:
+        panel = QWidget()
+        panel.setMinimumWidth(320)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        tx_box, self.tx = build_transmission_group()
+        layout.addWidget(tx_box)
+
         tabs = QTabWidget()
         self.summary = QPlainTextEdit()
         self.summary.setReadOnly(True)
@@ -90,36 +114,8 @@ class SafeConsoleTab(QWidget):
         self.show2.setReadOnly(True)
         self.show2.setFont(QFont("Menlo", 12))
         tabs.addTab(self.show2, "show2()")
-        right_layout.addWidget(tabs, 1)
-        body.addWidget(right, 1)
-
-    def _transmission_box(self) -> QGroupBox:
-        box = QGroupBox("Transmission")
-        form = QFormLayout(box)
-        self.interface = QComboBox()
-        self.interface.addItem("")
-        self.interface.addItems(list_interfaces())
-        self.send_mode = QComboBox()
-        self.send_mode.addItems(["Layer 3", "Layer 2"])
-        self.count = self._spin(1, 100000, 1)
-        self.interval_ms = self._spin(0, 3_600_000, 100)
-        self.timeout_ms = self._spin(50, 3_600_000, 1000)
-        self.retry_count = self._spin(0, 100, 0)
-        self.verbose = QCheckBox()
-        form.addRow("Interface", self.interface)
-        form.addRow("Send mode", self.send_mode)
-        form.addRow("Count", self.count)
-        form.addRow("Interval (ms)", self.interval_ms)
-        form.addRow("Timeout (ms)", self.timeout_ms)
-        form.addRow("Retry", self.retry_count)
-        form.addRow("Verbose", self.verbose)
-        return box
-
-    def _spin(self, minimum: int, maximum: int, value: int) -> QSpinBox:
-        spin = QSpinBox()
-        spin.setRange(minimum, maximum)
-        spin.setValue(value)
-        return spin
+        layout.addWidget(tabs, 1)
+        return panel
 
     def validate_expression(self) -> None:
         try:
@@ -163,18 +159,18 @@ class SafeConsoleTab(QWidget):
         packet = self.build_packet()
         if packet is None:
             return
-        layer2 = self.send_mode.currentText() == "Layer 2"
+        layer2 = self.tx.send_mode.currentText() == "Layer 2"
         function: SendFunction = (
             "srp1" if wait and layer2 else "sr1" if wait else "sendp" if layer2 else "send"
         )
         options = SendOptions(
             function=function,
-            iface=self.interface.currentText() or None,
-            count=self.count.value(),
-            interval_s=self.interval_ms.value() / 1000,
-            timeout_s=self.timeout_ms.value() / 1000,
-            retry=self.retry_count.value(),
-            verbose=self.verbose.isChecked(),
+            iface=self.tx.interface.currentText() or None,
+            count=self.tx.count.value(),
+            interval_s=self.tx.interval_ms.value() / 1000,
+            timeout_s=self.tx.timeout_ms.value() / 1000,
+            retry=self.tx.retry_count.value(),
+            verbose=self.tx.verbose.isChecked(),
         )
         worker = SendWorker(packet, options)
         worker.completed.connect(

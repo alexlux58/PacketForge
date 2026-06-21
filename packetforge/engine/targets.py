@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 # Hard ceiling so an accidental "0.0.0.0/0" cannot expand into millions of probes.
@@ -41,18 +42,17 @@ def parse_targets(spec: str, *, max_targets: int = DEFAULT_MAX_TARGETS) -> Targe
 
     for token in _tokenize(spec):
         try:
-            expanded = expand_token(token)
+            for host in _iter_token_hosts(token):
+                if host in seen:
+                    continue
+                if len(targets) >= max_targets:
+                    truncated = True
+                    break
+                seen.add(host)
+                targets.append(host)
         except ValueError:
             skipped.append(token)
             continue
-        for host in expanded:
-            if host in seen:
-                continue
-            if len(targets) >= max_targets:
-                truncated = True
-                break
-            seen.add(host)
-            targets.append(host)
         if truncated:
             break
 
@@ -73,24 +73,35 @@ def _tokenize(spec: str) -> list[str]:
 
 
 def expand_token(token: str) -> list[str]:
+    return list(_iter_token_hosts(token))
+
+
+def _iter_token_hosts(token: str) -> Iterator[str]:
     token = token.strip()
     if not token:
         raise ValueError("empty token")
     if "/" in token:
-        return _expand_cidr(token)
+        yield from _iter_cidr_hosts(token)
+        return
     if "-" in token:
-        return _expand_range(token)
-    return [_normalize_host(token)]
+        yield from _iter_range_hosts(token)
+        return
+    yield _normalize_host(token)
+
+
+def _iter_cidr_hosts(token: str) -> Iterator[str]:
+    network = ipaddress.ip_network(token, strict=False)
+    if network.num_addresses <= 2 or network.prefixlen >= network.max_prefixlen - 1:
+        yield from (str(addr) for addr in network)
+        return
+    yield from (str(addr) for addr in network.hosts())
 
 
 def _expand_cidr(token: str) -> list[str]:
-    network = ipaddress.ip_network(token, strict=False)
-    if network.num_addresses <= 2 or network.prefixlen >= network.max_prefixlen - 1:
-        return [str(addr) for addr in network]
-    return [str(addr) for addr in network.hosts()]
+    return list(_iter_cidr_hosts(token))
 
 
-def _expand_range(token: str) -> list[str]:
+def _iter_range_hosts(token: str) -> Iterator[str]:
     start_str, _, end_str = token.partition("-")
     start_str = start_str.strip()
     end_str = end_str.strip()
@@ -104,7 +115,12 @@ def _expand_range(token: str) -> list[str]:
         raise ValueError("range endpoints must be the same address family")
     if int(end) < int(start):
         raise ValueError("range end is before range start")
-    return [str(ipaddress.ip_address(value)) for value in range(int(start), int(end) + 1)]
+    for value in range(int(start), int(end) + 1):
+        yield str(ipaddress.ip_address(value))
+
+
+def _expand_range(token: str) -> list[str]:
+    return list(_iter_range_hosts(token))
 
 
 def _normalize_host(token: str) -> str:
@@ -122,6 +138,13 @@ def _normalize_host(token: str) -> str:
 
 def estimate_count(spec: str, *, max_targets: int = DEFAULT_MAX_TARGETS) -> int:
     return parse_targets(spec, max_targets=max_targets).count
+
+
+def preview_targets(
+    spec: str, *, max_targets: int = DEFAULT_MAX_TARGETS
+) -> TargetParseResult:
+    """Parse targets for UI preview without blocking on huge expansions."""
+    return parse_targets(spec, max_targets=max_targets)
 
 
 def is_local_subnet(token: str) -> bool:

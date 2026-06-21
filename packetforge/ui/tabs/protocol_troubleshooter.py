@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -24,6 +23,7 @@ from packetforge.engine.protocols import bgp, dhcp, dns, ntp, ospf, smtp, snmp, 
 from packetforge.models.discovery import ProtocolProbeResult
 from packetforge.ui.state import ObservabilityState
 from packetforge.ui.widgets.error_banner import ErrorBanner
+from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.workers import ProtocolWorker
 
 ProbeTask = Callable[[], ProtocolProbeResult]
@@ -36,16 +36,16 @@ class ProtocolTroubleshooterTab(QWidget):
         self.obs_state = obs_state
 
         root = QVBoxLayout(self)
-        title = QLabel("Protocol Troubleshooter")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-        note = QLabel(
-            "Read-only by default. Anything that emits non-standard traffic (zone transfer, "
-            "DHCP discover, BGP OPEN, active OSPF/STP) requires an explicit Lab-mode toggle."
+        root.addWidget(
+            PageHeader(
+                "Protocol Troubleshooter",
+                "protocol_troubleshooter",
+                subtitle=(
+                    "Read-only probes by default. Lab mode enables disruptive traffic — "
+                    "lab networks only. Click i for per-protocol safety notes."
+                ),
+            )
         )
-        note.setObjectName("Muted")
-        note.setWordWrap(True)
-        root.addWidget(note)
 
         self.error_banner = ErrorBanner()
         root.addWidget(self.error_banner)

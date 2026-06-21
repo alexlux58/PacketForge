@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
@@ -38,6 +39,8 @@ class DataTable(QWidget):
         super().__init__()
         self._columns = list(columns)
         self._filter_text = ""
+        self._sortable = sortable
+        self._bulk_depth = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -82,6 +85,34 @@ class DataTable(QWidget):
 
     def set_export_handler(self, handler: Callable[[], None]) -> None:
         self.export_button.clicked.connect(handler)
+
+    def begin_bulk_update(self) -> None:
+        """Disable sorting while rows are inserted one at a time."""
+        self._bulk_depth += 1
+        if self._bulk_depth == 1:
+            self.table.setSortingEnabled(False)
+
+    def end_bulk_update(self) -> None:
+        if self._bulk_depth == 0:
+            return
+        self._bulk_depth -= 1
+        if self._bulk_depth == 0 and self._sortable:
+            self.table.setSortingEnabled(True)
+            self.table.sortItems(0, Qt.SortOrder.AscendingOrder)
+
+    def resize_columns_to_contents(self) -> None:
+        self.table.resizeColumnsToContents()
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(True)
+
+    def scroll_to_bottom(self) -> None:
+        row_count = self.table.rowCount()
+        if row_count == 0:
+            return
+        item = self.table.item(row_count - 1, 0)
+        if item is None:
+            return
+        self.table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtBottom)
 
     def save_csv(self, path: str | Path) -> None:
         rows = self.visible_rows()
@@ -135,6 +166,7 @@ class DataTable(QWidget):
 
     def set_cell(self, row: int, column: int, value: str, *, user_data: str | None = None) -> None:
         item = QTableWidgetItem(value)
+        _apply_sort_key(item, value)
         if user_data is not None and column == 0:
             item.setData(Qt.ItemDataRole.UserRole, user_data)
         self.table.setItem(row, column, item)
@@ -189,3 +221,22 @@ class DataTable(QWidget):
         empty = self.table.rowCount() == 0
         self.empty.setVisible(empty)
         self.table.setVisible(not empty)
+
+
+_NUMERIC_PREFIX = re.compile(r"^(-?\d+(?:\.\d+)?)")
+
+
+def _apply_sort_key(item: QTableWidgetItem, value: str) -> None:
+    stripped = value.strip()
+    if not stripped:
+        return
+    if stripped.isdigit():
+        item.setData(Qt.ItemDataRole.EditRole, int(stripped))
+        return
+    match = _NUMERIC_PREFIX.match(stripped.replace(",", ""))
+    if match is not None:
+        text = match.group(1)
+        item.setData(
+            Qt.ItemDataRole.EditRole,
+            int(text) if "." not in text else float(text),
+        )

@@ -38,7 +38,6 @@ from packetforge.engine.builder import (
     packet_hexdump,
     packet_summary,
 )
-from packetforge.engine.interfaces import list_interfaces
 from packetforge.engine.sender import SendFunction, SendOptions
 from packetforge.models.packet import (
     ICMPLayer,
@@ -54,7 +53,9 @@ from packetforge.models.preset import Preset, PresetCategory
 from packetforge.presets.storage import PresetStore
 from packetforge.security.safe_scapy import SafeScapyError, parse_scapy_expression
 from packetforge.ui.widgets.form_helpers import add_form_row
+from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.widgets.persistent_splitter import PersistentSplitter
+from packetforge.ui.widgets.transmission_form import TransmissionControls, build_transmission_group
 from packetforge.ui.workers import SendWorker
 from packetforge.utils.export import export_packets_to_pcap, load_packets_from_pcap
 
@@ -104,11 +105,19 @@ class PacketBuilderTab(QWidget):
         self.config = default_ping_packet()
         self.send_workers: list[SendWorker] = []
         self._setting_code = False
+        self.tx: TransmissionControls
 
         root = QVBoxLayout(self)
-        title = QLabel("Packet Builder")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
+        root.addWidget(
+            PageHeader(
+                "Packet Builder",
+                "packet_builder",
+                subtitle=(
+                    "Visual layer editor with live Scapy code. "
+                    "Click i for build and send workflow."
+                ),
+            )
+        )
 
         splitter = PersistentSplitter(
             Qt.Orientation.Horizontal,
@@ -167,29 +176,7 @@ class PacketBuilderTab(QWidget):
             add_layout.addWidget(button)
         layout.addWidget(add_box)
 
-        tx_box = QGroupBox("Transmission")
-        tx_form = QFormLayout(tx_box)
-        self.interface = QComboBox()
-        self.interface.addItem("")
-        self.interface.addItems(list_interfaces())
-        self.send_mode = QComboBox()
-        self.send_mode.addItems(["Layer 3", "Layer 2"])
-        self.packet_count = self._spin(1, 100000, 1)
-        self.interval_ms = self._spin(0, 3_600_000, 100)
-        self.timeout_ms = self._spin(50, 3_600_000, 1000)
-        self.retry_count = self._spin(0, 100, 0)
-        self.verbose = QCheckBox()
-        add_form_row(tx_form, "Interface", self.interface, tooltip=_FIELD_TOOLTIPS["Interface"])
-        add_form_row(tx_form, "Send mode", self.send_mode, tooltip=_FIELD_TOOLTIPS["Send mode"])
-        add_form_row(tx_form, "Count", self.packet_count, tooltip=_FIELD_TOOLTIPS["Count"])
-        add_form_row(
-            tx_form, "Interval (ms)", self.interval_ms, tooltip=_FIELD_TOOLTIPS["Interval (ms)"]
-        )
-        add_form_row(
-            tx_form, "Timeout (ms)", self.timeout_ms, tooltip=_FIELD_TOOLTIPS["Timeout (ms)"]
-        )
-        add_form_row(tx_form, "Retry", self.retry_count, tooltip=_FIELD_TOOLTIPS["Retry"])
-        add_form_row(tx_form, "Verbose", self.verbose, tooltip=_FIELD_TOOLTIPS["Verbose"])
+        tx_box, self.tx = build_transmission_group(tooltips=_FIELD_TOOLTIPS)
         layout.addWidget(tx_box)
         layout.addStretch(1)
         return panel
@@ -780,21 +767,21 @@ class PacketBuilderTab(QWidget):
         self._start_send(self._send_options(wait=True, count=1))
 
     def send_multiple(self) -> None:
-        self._start_send(self._send_options(wait=False, count=self.packet_count.value()))
+        self._start_send(self._send_options(wait=False, count=self.tx.count.value()))
 
     def _send_options(self, *, wait: bool, count: int) -> SendOptions:
-        layer2 = self.send_mode.currentText() == "Layer 2"
+        layer2 = self.tx.send_mode.currentText() == "Layer 2"
         function: SendFunction = (
             "srp1" if wait and layer2 else "sr1" if wait else "sendp" if layer2 else "send"
         )
         return SendOptions(
             function=function,
-            iface=self.interface.currentText() or None,
+            iface=self.tx.interface.currentText() or None,
             count=count,
-            interval_s=self.interval_ms.value() / 1000,
-            timeout_s=self.timeout_ms.value() / 1000,
-            retry=self.retry_count.value(),
-            verbose=self.verbose.isChecked(),
+            interval_s=self.tx.interval_ms.value() / 1000,
+            timeout_s=self.tx.timeout_ms.value() / 1000,
+            retry=self.tx.retry_count.value(),
+            verbose=self.tx.verbose.isChecked(),
         )
 
     def _start_send(self, options: SendOptions) -> None:

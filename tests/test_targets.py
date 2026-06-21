@@ -3,6 +3,7 @@ from packetforge.engine.targets import (
     expand_token,
     is_local_subnet,
     parse_targets,
+    preview_targets,
 )
 
 
@@ -59,6 +60,18 @@ def test_truncation_respects_max_targets() -> None:
     assert result.count == 10
     assert result.truncated is True
     assert any("truncated" in warning.lower() for warning in result.warnings)
+
+
+def test_large_cidr_preview_stops_early() -> None:
+    result = parse_targets("10.0.0.0/8", max_targets=10)
+    assert result.count == 10
+    assert result.truncated is True
+
+
+def test_partial_target_while_typing_is_fast() -> None:
+    result = preview_targets("192.168.4.")
+    assert result.count == 0
+    assert result.skipped
 
 
 def test_estimate_count_matches_parse() -> None:

@@ -85,17 +85,21 @@ Python-native libraries for packet construction, transmission, inspection, and P
 
 ## Install and run
 
-PacketForge targets local desktop use on **macOS** and **Linux** with Python 3.12+.
+PacketForge targets local desktop use on **macOS** and **Linux** with **Python 3.12 or 3.13**.
+Python 3.14 is not supported yet — PySide6 cannot load the GUI platform plugins on 3.14+.
+
+On macOS, Homebrew's default `python3` may be 3.14. Install 3.12 explicitly:
 
 ```bash
-python3 -m venv .venv
+brew install python@3.12
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e ".[dev]"
 packetforge
 ```
 
-If `python3 --version` is below 3.12, install Python 3.12+ first (e.g. `brew install python@3.12`).
+If your system `python3` is already 3.12 or 3.13, you can use `python3 -m venv .venv` instead.
 Run each line separately — do not paste inline comments into the shell.
 
 The editable install above is the supported development workflow and is **not** affected by the
@@ -160,6 +164,10 @@ Briefcase metadata lives under `[tool.briefcase]` in `pyproject.toml`.
 
 ## Troubleshooting (Scapy / PySide6 install)
 
+- **`qt.qpa.plugin: Could not find the Qt platform plugin "cocoa"` (macOS).** This usually means
+  you are on **Python 3.14+**, which PySide6 does not fully support yet. Recreate the venv with
+  Python 3.12 or 3.13: `brew install python@3.12 && python3.12 -m venv .venv`. Confirm with
+  `python --version` before reinstalling.
 - **`qt.qpa.plugin: could not load the Qt platform plugin "xcb"` (Linux).** Install the platform
   libraries: `sudo apt-get install -y libxcb-cursor0 libgl1 libegl1` (Debian/Ubuntu). For headless
   servers/CI, set `QT_QPA_PLATFORM=offscreen`.

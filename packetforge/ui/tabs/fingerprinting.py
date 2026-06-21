@@ -23,6 +23,7 @@ from packetforge.security.privileges import detect_privileges
 from packetforge.ui import charts
 from packetforge.ui.state import DiscoveryState
 from packetforge.ui.widgets.error_banner import ErrorBanner
+from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.workers import FingerprintWorker
 
 
@@ -34,16 +35,16 @@ class FingerprintingTab(QWidget):
         self.privileges = detect_privileges()
 
         root = QVBoxLayout(self)
-        title = QLabel("Fingerprinting")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-        note = QLabel(
-            "Passive and active TCP/IP signal analysis. PacketForge reports a likely OS "
-            "family with evidence and a confidence score; it never claims an exact OS."
+        root.addWidget(
+            PageHeader(
+                "Fingerprinting",
+                "fingerprinting",
+                subtitle=(
+                    "Likely OS family from TTL, TCP, ICMP, and banner evidence — never an "
+                    "exact OS. Click i for interpretation help."
+                ),
+            )
         )
-        note.setObjectName("Muted")
-        note.setWordWrap(True)
-        root.addWidget(note)
 
         self.error_banner = ErrorBanner()
         root.addWidget(self.error_banner)

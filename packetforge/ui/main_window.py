@@ -34,6 +34,7 @@ from packetforge.ui.tabs.placeholders import PlaceholderTab
 from packetforge.ui.tabs.protocol_troubleshooter import ProtocolTroubleshooterTab
 from packetforge.ui.tabs.settings import SettingsTab
 from packetforge.ui.tabs.simulation import SimulationTab
+from packetforge.ui.widgets.help_dialog import HelpDialog
 
 
 class MainWindow(QMainWindow):
@@ -147,6 +148,14 @@ class MainWindow(QMainWindow):
         view.addAction(light)
 
         help_menu = self.menuBar().addMenu("&Help")
+        overview = QAction("PacketForge overview", self)
+        overview.triggered.connect(lambda: HelpDialog.show_for("global", self))
+        help_menu.addAction(overview)
+        this_tab = QAction("This tab", self)
+        this_tab.setShortcut(QKeySequence("F1"))
+        this_tab.triggered.connect(self._open_help_for_current_tab)
+        help_menu.addAction(this_tab)
+        help_menu.addSeparator()
         env_check = QAction("Environment Check", self)
         env_check.triggered.connect(self.open_environment_check)
         help_menu.addAction(env_check)
@@ -179,6 +188,25 @@ class MainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         self.sidebar.setCurrentRow(self.stack.indexOf(self.settings_tab))
+
+    def _open_help_for_current_tab(self) -> None:
+        widget = self.stack.currentWidget()
+        keys = {
+            self.dashboard: "dashboard",
+            self.discovery_center: "discovery_center",
+            self.fingerprinting: "fingerprinting",
+            self.network_map: "network_map",
+            self.protocol_troubleshooter: "protocol_troubleshooter",
+            self.observability: "observability",
+            self.ping_lab: "ping_lab",
+            self.packet_builder: "packet_builder",
+            self.console: "scapy_console",
+            self.simulation: "simulation",
+            self.diagnostics: "diagnostics",
+            self.environment: "environment",
+            self.settings_tab: "settings",
+        }
+        HelpDialog.show_for(keys.get(widget, "global"), self)
 
     def _select_initial_tab(self) -> None:
         """Show the Environment Check on first launch, otherwise restore preferences."""
@@ -305,12 +333,39 @@ QGroupBox::title {
     left: 10px;
     padding: 0 4px;
 }
-QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QTableWidget, QTreeWidget {
+QLineEdit, QPlainTextEdit, QSpinBox, QTableWidget, QTreeWidget {
     background: #0d1014;
     color: #e7edf3;
     border: 1px solid #2d3642;
     border-radius: 4px;
     padding: 5px;
+}
+QComboBox {
+    background: #0d1014;
+    color: #e7edf3;
+    border: 1px solid #2d3642;
+    border-radius: 4px;
+    padding: 5px 28px 5px 8px;
+    min-height: 1.4em;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid #2d3642;
+}
+QComboBox::down-arrow {
+    width: 10px;
+    height: 10px;
+}
+QComboBox QAbstractItemView {
+    background: #0d1014;
+    color: #e7edf3;
+    border: 1px solid #2d3642;
+    selection-background-color: #285d8f;
+    selection-color: #ffffff;
+    outline: 0;
+    padding: 2px;
 }
 QTableWidget {
     alternate-background-color: #151a21;
@@ -322,12 +377,31 @@ QPushButton {
     border: 1px solid #3b4654;
     border-radius: 5px;
     padding: 7px 10px;
+    min-height: 24px;
 }
 QPushButton:hover {
     background: #334150;
 }
 QTabWidget::pane {
     border: 1px solid #2d3642;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #171b21;
+    color: #aeb8c3;
+    border: 1px solid #2d3642;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 7px 14px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background: #0d1014;
+    color: #e7edf3;
+}
+QTabBar::tab:hover {
+    color: #e7edf3;
 }
 QLabel#PageTitle {
     font-size: 24px;
@@ -351,6 +425,22 @@ QLabel#SimulationBanner {
     border: 1px solid #ffcf66;
     border-radius: 5px;
     padding: 6px 10px;
+}
+QPushButton#HelpButton {
+    background: #285d8f;
+    color: #ffffff;
+    border: 1px solid #3b7cb8;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 0;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+QPushButton#HelpButton:hover {
+    background: #337ab7;
 }
 """
 
@@ -388,12 +478,39 @@ QGroupBox::title {
     left: 10px;
     padding: 0 4px;
 }
-QLineEdit, QPlainTextEdit, QComboBox, QSpinBox, QTableWidget, QTreeWidget {
+QLineEdit, QPlainTextEdit, QSpinBox, QTableWidget, QTreeWidget {
     background: #ffffff;
     color: #16202a;
     border: 1px solid #cfd8e3;
     border-radius: 4px;
     padding: 5px;
+}
+QComboBox {
+    background: #ffffff;
+    color: #16202a;
+    border: 1px solid #cfd8e3;
+    border-radius: 4px;
+    padding: 5px 28px 5px 8px;
+    min-height: 1.4em;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid #cfd8e3;
+}
+QComboBox::down-arrow {
+    width: 10px;
+    height: 10px;
+}
+QComboBox QAbstractItemView {
+    background: #ffffff;
+    color: #16202a;
+    border: 1px solid #cfd8e3;
+    selection-background-color: #2f75b5;
+    selection-color: #ffffff;
+    outline: 0;
+    padding: 2px;
 }
 QTableWidget {
     alternate-background-color: #f3f7fb;
@@ -405,12 +522,31 @@ QPushButton {
     border: 1px solid #b7c2cf;
     border-radius: 5px;
     padding: 7px 10px;
+    min-height: 24px;
 }
 QPushButton:hover {
     background: #edf3f8;
 }
 QTabWidget::pane {
     border: 1px solid #cfd8e3;
+    top: -1px;
+}
+QTabBar::tab {
+    background: #e9eef3;
+    color: #5f6f80;
+    border: 1px solid #cfd8e3;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    padding: 7px 14px;
+    margin-right: 2px;
+}
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #16202a;
+}
+QTabBar::tab:hover {
+    color: #16202a;
 }
 QLabel#PageTitle {
     font-size: 24px;
@@ -434,5 +570,21 @@ QLabel#SimulationBanner {
     border: 1px solid #e0b400;
     border-radius: 5px;
     padding: 6px 10px;
+}
+QPushButton#HelpButton {
+    background: #2f75b5;
+    color: #ffffff;
+    border: 1px solid #2563a8;
+    border-radius: 14px;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 0;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+QPushButton#HelpButton:hover {
+    background: #3a86c8;
 }
 """

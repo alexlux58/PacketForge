@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from packetforge.diagnostics import Diagnostics, build_debug_bundle, get_diagnostics
+from packetforge.ui.widgets.page_header import PageHeader
 
 _LEVELS: list[tuple[str, int]] = [
     ("All", 0),
@@ -58,17 +59,16 @@ class DiagnosticsTab(QWidget):
         self._min_level = 0
 
         root = QVBoxLayout(self)
-        title = QLabel("Diagnostics")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-
-        intro = QLabel(
-            "Recent operations, exceptions, Scapy/permission errors, and timing. "
-            "Logs also stream to a rotating file under ~/.packetforge/logs/."
+        root.addWidget(
+            PageHeader(
+                "Diagnostics",
+                "diagnostics",
+                subtitle=(
+                    "Live debug log and support bundle export. Logs also write to "
+                    "~/.packetforge/logs/. Click i for details."
+                ),
+            )
         )
-        intro.setObjectName("Muted")
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Level"))

@@ -21,9 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from packetforge.engine.interfaces import list_interfaces
 from packetforge.engine.observability import reachability_breakdown
-from packetforge.engine.targets import parse_targets
+from packetforge.engine.targets import parse_targets, preview_targets
 from packetforge.errors import ErrorEvent, report_exception
 from packetforge.models.discovery import (
     DEFAULT_TCP_PORTS,
@@ -40,8 +39,12 @@ from packetforge.ui.preferences import AppPreferences
 from packetforge.ui.state import DiscoveryState
 from packetforge.ui.widgets.data_table import DataTable
 from packetforge.ui.widgets.error_banner import ErrorBanner
+from packetforge.ui.widgets.form_helpers import add_form_row
 from packetforge.ui.widgets.host_detail import HostDetailPanel
+from packetforge.ui.widgets.interface_combo import defer_populate_interface_combo, tune_combo_box
+from packetforge.ui.widgets.page_header import PageHeader
 from packetforge.ui.widgets.persistent_splitter import PersistentSplitter
+from packetforge.ui.widgets.transmission_form import configure_form_layout, tune_spin_box
 from packetforge.ui.workers import DiscoveryWorker
 from packetforge.utils.export import (
     export_hosts_csv,
@@ -64,6 +67,15 @@ _COLUMNS = [
     "Protocols", "Confidence", "Methods", "Last seen",
 ]
 
+_FIELD_TOOLTIPS: dict[str, str] = {
+    "Targets": "IP, CIDR, comma list, range, or hostname. Example: 192.168.1.0/24",
+    "Interface": "Outbound interface for probes and passive capture. Leave blank for auto.",
+    "Profile": "Gentle, Balanced, or Lab Fast — controls probe rate and timeout.",
+    "TCP ports": "Comma-separated TCP ports for connect scans.",
+    "UDP ports": "Comma-separated UDP ports for UDP probes.",
+    "Passive seconds": "How long to listen when passive capture is enabled.",
+}
+
 
 class DiscoveryCenterTab(QWidget):
     status_message = Signal(str)
@@ -77,26 +89,41 @@ class DiscoveryCenterTab(QWidget):
         self._row_for_ip: dict[str, int] = {}
 
         root = QVBoxLayout(self)
-        title = QLabel("Discovery Center")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-        warning = QLabel(
-            "Authorized networks only. Active discovery sends packets; choose a profile "
-            "with a rate limit you are comfortable with. Default profiles are conservative."
+        root.addWidget(
+            PageHeader(
+                "Discovery Center",
+                "discovery_center",
+                subtitle=(
+                    "Authorized networks only. Active discovery sends packets — pick a "
+                    "conservative profile. Click i for help interpreting results."
+                ),
+            )
         )
-        warning.setObjectName("Muted")
-        warning.setWordWrap(True)
-        root.addWidget(warning)
 
         self.error_banner = ErrorBanner()
         root.addWidget(self.error_banner)
 
-        body = QHBoxLayout()
-        root.addLayout(body, 1)
-        body.addWidget(self._build_controls(), 0)
+        body = PersistentSplitter(
+            Qt.Orientation.Horizontal,
+            "splitter/discovery_main",
+            default_sizes=[380, 900],
+        )
+        root.addWidget(body, 1)
+        body.addWidget(self._build_controls())
+        body.addWidget(self._build_results_panel())
+        body.restore()
 
-        right = QVBoxLayout()
-        body.addLayout(right, 1)
+        self._mini_timer = QTimer(self)
+        self._mini_timer.setSingleShot(True)
+        self._mini_timer.setInterval(400)
+        self._mini_timer.timeout.connect(self._refresh_mini)
+
+        self.state.hosts_changed.connect(self._sync_from_state)
+
+    def _build_results_panel(self) -> QWidget:
+        panel = QWidget()
+        right = QVBoxLayout(panel)
+        right.setContentsMargins(0, 0, 0, 0)
 
         self.mini_reach = QLabel("Reachability: no hosts yet.")
         self.mini_reach.setObjectName("Muted")
@@ -137,29 +164,34 @@ class DiscoveryCenterTab(QWidget):
         self.log = QListWidget()
         self.log.setMaximumHeight(140)
         right.addWidget(self.log)
+        return panel
 
-        self._mini_timer = QTimer(self)
-        self._mini_timer.setSingleShot(True)
-        self._mini_timer.setInterval(400)
-        self._mini_timer.timeout.connect(self._refresh_mini)
+    def _build_controls(self) -> QWidget:
+        panel = QWidget()
+        panel.setMinimumWidth(340)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        self.state.hosts_changed.connect(self._sync_from_state)
-
-    def _build_controls(self) -> QGroupBox:
         box = QGroupBox("Scan setup")
-        box.setFixedWidth(330)
         form = QFormLayout(box)
+        configure_form_layout(form)
 
         self.targets = QLineEdit("192.168.1.0/24")
         self.target_estimate = QLabel("")
         self.target_estimate.setObjectName("Muted")
-        self.targets.textChanged.connect(self._update_estimate)
+        self._estimate_timer = QTimer(self)
+        self._estimate_timer.setSingleShot(True)
+        self._estimate_timer.setInterval(300)
+        self._estimate_timer.timeout.connect(self._update_estimate)
+        self.targets.textChanged.connect(self._schedule_estimate)
 
-        self.interface = QComboBox()
-        self.interface.addItem("")
-        self.interface.addItems(list_interfaces())
+        self.interface = tune_combo_box(QComboBox())
+        defer_populate_interface_combo(
+            self.interface,
+            selected=self.prefs.default_interface,
+        )
 
-        self.profile = QComboBox()
+        self.profile = tune_combo_box(QComboBox())
         self.profile.addItems([profile.name for profile in BUILTIN_PROFILES])
         self.profile.setCurrentText("Balanced")
         self.profile.currentTextChanged.connect(self._update_profile_hint)
@@ -176,31 +208,37 @@ class DiscoveryCenterTab(QWidget):
                 checkbox.setChecked(True)
             if method in PRIVILEGED_METHODS and not self.privileges.raw_sockets:
                 checkbox.setText(f"{label} (needs elevation)")
+                checkbox.setToolTip("Requires raw sockets — run with sudo or grant capabilities.")
             self.method_boxes[method] = checkbox
             methods_layout.addWidget(checkbox)
 
         self.tcp_ports = QLineEdit(",".join(str(p) for p in DEFAULT_TCP_PORTS))
         self.udp_ports = QLineEdit(",".join(str(p) for p in DEFAULT_UDP_PORTS))
-        self.passive_seconds = QSpinBox()
+        self.passive_seconds = tune_spin_box(QSpinBox())
         self.passive_seconds.setRange(1, 600)
         self.passive_seconds.setValue(15)
         self.grab_banners = QCheckBox("Grab service banners")
         self.grab_banners.setChecked(True)
         self.record_pcap = QCheckBox("Record passive PCAP")
 
-        form.addRow("Targets", self.targets)
+        add_form_row(form, "Targets", self.targets, tooltip=_FIELD_TOOLTIPS["Targets"])
         form.addRow("", self.target_estimate)
         self.targets_hint = QLabel("")
         self.targets_hint.setObjectName("Muted")
         self.targets_hint.setWordWrap(True)
         form.addRow("", self.targets_hint)
-        form.addRow("Interface", self.interface)
-        form.addRow("Profile", self.profile)
+        add_form_row(form, "Interface", self.interface, tooltip=_FIELD_TOOLTIPS["Interface"])
+        add_form_row(form, "Profile", self.profile, tooltip=_FIELD_TOOLTIPS["Profile"])
         form.addRow("", self.profile_hint)
         form.addRow(methods_box)
-        form.addRow("TCP ports", self.tcp_ports)
-        form.addRow("UDP ports", self.udp_ports)
-        form.addRow("Passive seconds", self.passive_seconds)
+        add_form_row(form, "TCP ports", self.tcp_ports, tooltip=_FIELD_TOOLTIPS["TCP ports"])
+        add_form_row(form, "UDP ports", self.udp_ports, tooltip=_FIELD_TOOLTIPS["UDP ports"])
+        add_form_row(
+            form,
+            "Passive seconds",
+            self.passive_seconds,
+            tooltip=_FIELD_TOOLTIPS["Passive seconds"],
+        )
         form.addRow(self.grab_banners)
         form.addRow(self.record_pcap)
 
@@ -209,26 +247,35 @@ class DiscoveryCenterTab(QWidget):
         self.privilege_hint.setWordWrap(True)
         form.addRow(self.privilege_hint)
 
-        buttons = QHBoxLayout()
+        run_buttons = QHBoxLayout()
         self.start_button = QPushButton("Start")
         self.stop_button = QPushButton("Stop")
         self.pause_button = QPushButton("Pause")
         self.resume_button = QPushButton("Resume")
         self.clear_button = QPushButton("Clear")
         for button in (
-            self.start_button, self.stop_button, self.pause_button,
-            self.resume_button, self.clear_button,
+            self.start_button,
+            self.stop_button,
+            self.pause_button,
+            self.resume_button,
+            self.clear_button,
         ):
-            buttons.addWidget(button)
-        form.addRow(buttons)
+            run_buttons.addWidget(button)
 
-        exports = QHBoxLayout()
-        self.export_csv = QPushButton("CSV")
-        self.export_json = QPushButton("JSON")
-        self.export_pcap = QPushButton("PCAP")
+        export_buttons = QHBoxLayout()
+        self.export_csv = QPushButton("Export CSV")
+        self.export_json = QPushButton("Export JSON")
+        self.export_pcap = QPushButton("Export PCAP")
         for button in (self.export_csv, self.export_json, self.export_pcap):
-            exports.addWidget(button)
-        form.addRow("Export", exports)
+            export_buttons.addWidget(button)
+
+        button_panel = QWidget()
+        button_layout = QVBoxLayout(button_panel)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(6)
+        button_layout.addLayout(run_buttons)
+        button_layout.addLayout(export_buttons)
+        form.addRow(button_panel)
 
         self.start_button.clicked.connect(self.start_scan)
         self.stop_button.clicked.connect(self.stop_scan)
@@ -242,13 +289,16 @@ class DiscoveryCenterTab(QWidget):
         self._update_estimate()
         self._update_profile_hint()
         self.profile.setCurrentText(self.prefs.default_scan_profile)
-        default_iface = self.prefs.default_interface
-        if default_iface:
-            self.interface.setCurrentText(default_iface)
-        return box
+
+        layout.addWidget(box)
+        layout.addStretch(1)
+        return panel
 
     def focus_search(self) -> None:
         self.host_table.focus_search()
+
+    def _schedule_estimate(self) -> None:
+        self._estimate_timer.start()
 
     def _update_estimate(self) -> None:
         text = self.targets.text().strip()
@@ -257,8 +307,11 @@ class DiscoveryCenterTab(QWidget):
             self.target_estimate.setObjectName("Muted")
             self.targets_hint.setText("")
             return
-        parsed = parse_targets(text)
-        self.target_estimate.setText(f"{parsed.count} target host(s)")
+        parsed = preview_targets(text)
+        label = f"{parsed.count} target host(s)"
+        if parsed.truncated:
+            label += " (preview capped)"
+        self.target_estimate.setText(label)
         if parsed.count == 0:
             self.target_estimate.setObjectName("Error")
             self.targets_hint.setText("No valid targets parsed. Use IP, CIDR, range, or hostname.")
@@ -331,6 +384,7 @@ class DiscoveryCenterTab(QWidget):
             )
             return
         self.clear()
+        self.host_table.begin_bulk_update()
         self.progress_label.setText("Starting scan...")
         self.status_message.emit(f"Discovery started: {config.targets}")
         self.worker = DiscoveryWorker(config)
@@ -368,7 +422,9 @@ class DiscoveryCenterTab(QWidget):
         self.state.clear()
 
     def _on_host(self, host: HostRecord) -> None:
-        self.state.upsert(host)
+        self.state.upsert(host, notify=False)
+        self._render_host(host)
+        self._mini_timer.start()
 
     def _on_progress(self, done: int, total: int) -> None:
         self.progress.setMaximum(total)
@@ -376,6 +432,8 @@ class DiscoveryCenterTab(QWidget):
         self.progress_label.setText(f"Probing {done} / {total} targets...")
 
     def _on_completed(self, run: DiscoveryRun) -> None:
+        self.host_table.end_bulk_update()
+        self.host_table.resize_columns_to_contents()
         self.state.set_run(run)
         from packetforge.engine.history import DiscoveryHistory
 
@@ -388,9 +446,11 @@ class DiscoveryCenterTab(QWidget):
         self._append_log(f"Done. {run.host_count} host(s) discovered.")
 
     def _on_failed(self, message: str) -> None:
+        self.host_table.end_bulk_update()
         self._append_log(f"Scan failed: {message}")
 
     def _on_error(self, event: ErrorEvent) -> None:
+        self.host_table.end_bulk_update()
         self.error_banner.show_event(event, on_retry=self.start_scan)
 
     def _append_log(self, message: str) -> None:
@@ -398,8 +458,18 @@ class DiscoveryCenterTab(QWidget):
         self.log.scrollToBottom()
 
     def _sync_from_state(self) -> None:
+        self.host_table.begin_bulk_update()
+        self.host_table.clear_rows()
+        self._row_for_ip.clear()
         for host in self.state.hosts():
             self._render_host(host)
+        self.host_table.end_bulk_update()
+        if self.state.hosts():
+            self.host_table.resize_columns_to_contents()
+        if not self.state.hosts():
+            self.host_detail.clear()
+            self.progress.setValue(0)
+            self.progress_label.setText("Idle")
         self._mini_timer.start()
 
     def _refresh_mini(self) -> None:

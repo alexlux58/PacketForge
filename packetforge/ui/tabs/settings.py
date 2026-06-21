@@ -6,15 +6,16 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QGroupBox,
-    QLabel,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from packetforge.engine.interfaces import list_interfaces
 from packetforge.models.profiles import BUILTIN_PROFILES
 from packetforge.ui.preferences import AppPreferences
+from packetforge.ui.widgets.interface_combo import defer_populate_interface_combo, tune_combo_box
+from packetforge.ui.widgets.page_header import PageHeader
+from packetforge.ui.widgets.transmission_form import configure_form_layout
 
 
 class SettingsTab(QWidget):
@@ -28,19 +29,20 @@ class SettingsTab(QWidget):
         self.preferences = preferences
 
         root = QVBoxLayout(self)
-        title = QLabel("Settings")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
-        intro = QLabel(
-            "Preferences are stored locally. Theme, window layout, and splitter sizes "
-            "are restored on the next launch."
+        root.addWidget(
+            PageHeader(
+                "Settings",
+                "settings",
+                subtitle=(
+                    "Local preferences restored on next launch. "
+                    "Click i for option descriptions."
+                ),
+            )
         )
-        intro.setObjectName("Muted")
-        intro.setWordWrap(True)
-        root.addWidget(intro)
 
         appearance = QGroupBox("Appearance")
         appearance_form = QFormLayout(appearance)
+        configure_form_layout(appearance_form)
         self.theme = QComboBox()
         self.theme.addItems(["dark", "light"])
         self.theme.setCurrentText(self.preferences.theme)
@@ -50,24 +52,25 @@ class SettingsTab(QWidget):
 
         discovery = QGroupBox("Discovery defaults")
         discovery_form = QFormLayout(discovery)
+        configure_form_layout(discovery_form)
         self.default_profile = QComboBox()
         self.default_profile.addItems([profile.name for profile in BUILTIN_PROFILES])
         self.default_profile.setCurrentText(self.preferences.default_scan_profile)
         self.default_profile.currentTextChanged.connect(self._save_discovery)
         discovery_form.addRow("Default profile", self.default_profile)
 
-        self.default_interface = QComboBox()
-        self.default_interface.addItem("")
-        self.default_interface.addItems(list_interfaces())
-        current_iface = self.preferences.default_interface
-        if current_iface:
-            self.default_interface.setCurrentText(current_iface)
+        self.default_interface = tune_combo_box(QComboBox())
+        defer_populate_interface_combo(
+            self.default_interface,
+            selected=self.preferences.default_interface,
+        )
         self.default_interface.currentTextChanged.connect(self._save_discovery)
         discovery_form.addRow("Default interface", self.default_interface)
         root.addWidget(discovery)
 
         ui_box = QGroupBox("UI behaviour")
         ui_form = QFormLayout(ui_box)
+        configure_form_layout(ui_form)
         self.remember_tab = QCheckBox("Restore last sidebar tab on launch")
         self.remember_tab.setChecked(self.preferences.remember_last_tab)
         self.remember_tab.toggled.connect(self._save_ui)

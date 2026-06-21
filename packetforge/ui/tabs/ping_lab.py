@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 import pyqtgraph as pg
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -23,13 +23,16 @@ from PySide6.QtWidgets import (
 )
 from scapy.packet import Packet
 
-from packetforge.engine.interfaces import list_interfaces
 from packetforge.errors import ErrorEvent, report_exception
 from packetforge.models.ping import PingConfig
 from packetforge.models.results import PingResult, PingSummary
 from packetforge.ui.state import ObservabilityState
 from packetforge.ui.widgets.data_table import DataTable
 from packetforge.ui.widgets.error_banner import ErrorBanner
+from packetforge.ui.widgets.interface_combo import defer_populate_interface_combo, tune_combo_box
+from packetforge.ui.widgets.page_header import PageHeader
+from packetforge.ui.widgets.persistent_splitter import PersistentSplitter
+from packetforge.ui.widgets.transmission_form import configure_form_layout, tune_spin_box
 from packetforge.ui.workers import PingWorker
 from packetforge.utils.export import (
     export_packets_to_pcap,
@@ -56,17 +59,29 @@ class PingLabTab(QWidget):
         self.captured_packets: list[Packet] = []
 
         root = QVBoxLayout(self)
-        title = QLabel("Ping Lab")
-        title.setObjectName("PageTitle")
-        root.addWidget(title)
+        root.addWidget(
+            PageHeader(
+                "Ping Lab",
+                "ping_lab",
+                subtitle=(
+                    "ICMP echo probes with live RTT charting. "
+                    "Click i for help interpreting statistics."
+                ),
+            )
+        )
 
         self.error_banner = ErrorBanner()
         root.addWidget(self.error_banner)
 
-        top = QHBoxLayout()
-        root.addLayout(top)
-        top.addWidget(self._build_controls(), 0)
-        top.addWidget(self._build_chart(), 1)
+        top = PersistentSplitter(
+            Qt.Orientation.Horizontal,
+            "splitter/ping_lab",
+            default_sizes=[380, 520],
+        )
+        root.addWidget(top, 0)
+        top.addWidget(self._build_controls())
+        top.addWidget(self._build_chart())
+        top.restore()
 
         self.stats_grid = QGridLayout()
         root.addLayout(self.stats_grid)
@@ -114,21 +129,22 @@ class PingLabTab(QWidget):
 
     def _build_controls(self) -> QGroupBox:
         box = QGroupBox("Controls")
+        box.setMinimumWidth(340)
         form = QFormLayout(box)
+        configure_form_layout(form)
 
         self.destination = QLineEdit("192.168.1.1")
-        self.family = QComboBox()
+        self.family = tune_combo_box(QComboBox())
         self.family.addItems(["IPv4", "IPv6"])
-        self.interface = QComboBox()
-        self.interface.addItem("")
-        self.interface.addItems(list_interfaces())
+        self.interface = tune_combo_box(QComboBox())
+        defer_populate_interface_combo(self.interface)
         self.source_ip = QLineEdit()
 
-        self.count = self._spin(1, 100000, 4)
-        self.interval_ms = self._spin(10, 3_600_000, 1000)
-        self.timeout_ms = self._spin(50, 3_600_000, 1000)
-        self.ttl = self._spin(0, 255, 64)
-        self.payload_size = self._spin(0, 65507, 32)
+        self.count = tune_spin_box(self._spin(1, 100000, 4))
+        self.interval_ms = tune_spin_box(self._spin(10, 3_600_000, 1000))
+        self.timeout_ms = tune_spin_box(self._spin(50, 3_600_000, 1000))
+        self.ttl = tune_spin_box(self._spin(0, 255, 64))
+        self.payload_size = tune_spin_box(self._spin(0, 65507, 56))
         self.dscp = self._spin(0, 63, 0)
         self.ecn = self._spin(0, 3, 0)
         self.icmp_id = self._spin(0, 65535, 0xF00D)
@@ -165,7 +181,7 @@ class PingLabTab(QWidget):
         form.addRow("Record PCAP", self.record_pcap)
         form.addRow("Size breakdown", self.size_label)
 
-        buttons = QHBoxLayout()
+        run_buttons = QHBoxLayout()
         self.run_button = QPushButton("Run")
         self.stop_button = QPushButton("Stop")
         self.pause_button = QPushButton("Pause")
@@ -180,17 +196,22 @@ class PingLabTab(QWidget):
             self.clear_button,
             self.run_again_button,
         ]:
-            buttons.addWidget(button)
-        form.addRow(buttons)
+            run_buttons.addWidget(button)
 
-        exports = QHBoxLayout()
+        export_buttons = QHBoxLayout()
         self.export_pcap = QPushButton("Save PCAP")
         self.export_csv = QPushButton("Save CSV")
         self.export_json = QPushButton("Save JSON")
-        exports.addWidget(self.export_pcap)
-        exports.addWidget(self.export_csv)
-        exports.addWidget(self.export_json)
-        form.addRow(exports)
+        for button in [self.export_pcap, self.export_csv, self.export_json]:
+            export_buttons.addWidget(button)
+
+        button_panel = QWidget()
+        button_layout = QVBoxLayout(button_panel)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(6)
+        button_layout.addLayout(run_buttons)
+        button_layout.addLayout(export_buttons)
+        form.addRow(button_panel)
 
         self.run_button.clicked.connect(self.start_ping)
         self.stop_button.clicked.connect(self.stop_ping)
@@ -245,9 +266,11 @@ class PingLabTab(QWidget):
             return
         self.error_banner.clear()
         self.clear_results()
+        self.table.begin_bulk_update()
         try:
             config = self._config()
         except Exception as exc:
+            self.table.end_bulk_update()
             event = report_exception(exc, source="Ping Lab", operation="configure")
             self.error_banner.show_event(event)
             return
@@ -261,6 +284,7 @@ class PingLabTab(QWidget):
         self.worker.start()
 
     def _on_error(self, event: ErrorEvent) -> None:
+        self.table.end_bulk_update()
         self.error_banner.show_event(event, on_retry=self.start_ping)
 
     def stop_ping(self) -> None:
@@ -293,6 +317,7 @@ class PingLabTab(QWidget):
         ]
         for column, value in enumerate(values):
             self.table.set_cell(row, column, value)
+        self.table.scroll_to_bottom()
         received = len(self.results)
         self.progress_label.setText(
             f"Received {received} / {self.count.value()} replies..."
@@ -336,6 +361,8 @@ class PingLabTab(QWidget):
         self.avg_curve.setData(sequences, rolling)
 
     def _completed(self, _results: object, packets: object) -> None:
+        self.table.end_bulk_update()
+        self.table.resize_columns_to_contents()
         self.captured_packets = list(packets) if isinstance(packets, list) else []
         self.progress_label.setText(
             f"Complete — {len(self.results)} result row(s), "
