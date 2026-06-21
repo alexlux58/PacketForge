@@ -224,15 +224,30 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         "Packet Builder",
         "Visual layer editor with live Scapy code generation.",
         (
-            "Workflow",
-            "Pick a preset or add layers (IPv4, ICMP, TCP, UDP, Raw), edit fields, Build to "
-            "preview, then Send or Save PCAP. Transmission settings choose Layer 3 (send) vs "
-            "Layer 2 (sendp).",
+            "Step by step",
+            "1) Pick a preset (left) or use Add Layer to stack IPv4/ICMP/TCP/UDP/Raw. "
+            "2) Edit fields in the middle; the Scapy Code and Hex Dump panels update live. "
+            "3) Click Build to preview. 4) Click Send to transmit. The action buttons are "
+            "the row under the layer editor: Build / Send / Send and Wait / Send Multiple on "
+            "top, and Save PCAP / Load PCAP / Save Preset / Copy Scapy Code / Clear below.",
+        ),
+        (
+            "Sending",
+            "Send transmits once; Send Multiple repeats Count times; Send and Wait uses sr/sr1 "
+            "and waits for a reply. All of them use the Transmission settings on the left — "
+            "Interface, Count, Interval, Timeout, and Send mode (Layer 3 = send, Layer 2 = "
+            "sendp). If you don't want to put packets on the wire, use Save PCAP instead.",
+        ),
+        (
+            "Privileges",
+            "Sending raw packets usually needs elevation (sudo on macOS, cap_net_raw on Linux). "
+            "Unprivileged, Send may fail with a permission error — Build, Save PCAP, and code "
+            "generation still work without it.",
         ),
         (
             "Scapy code",
-            "The code panel stays in sync with the visual editor. You can copy it into Scapy "
-            "Console for safe-expression sending.",
+            "The code panel stays in sync with the visual editor. Copy it into the Scapy "
+            "Console, or edit it and click Apply Scapy Code to validate.",
         ),
     ),
     "scapy_console": _topic(
@@ -240,9 +255,17 @@ HELP_TOPICS: dict[str, HelpTopic] = {
         "Safe Scapy Console",
         "Build packets from a restricted Scapy expression — no arbitrary Python.",
         (
-            "Workflow",
-            "Enter an expression like IP(dst=\"10.0.0.1\")/ICMP(), click Validate, then Build. "
-            "Send transmits once; Send and Wait uses sr/sr1 for a reply.",
+            "Step by step",
+            "1) Type an expression like IP(dst=\"10.0.0.1\")/ICMP() in the left editor. "
+            "2) Click Validate to check syntax. 3) Click Build to render it (Summary, Hex "
+            "Dump, show2() on the right). 4) Click Send to transmit. The buttons — Validate, "
+            "Build, Send, Send and Wait, Save PCAP — are the row directly under the editor.",
+        ),
+        (
+            "Sending",
+            "Send transmits once; Send and Wait uses sr/sr1 for a reply. Both use the "
+            "Transmission settings on the right (Interface, Count, Send mode). Sending raw "
+            "packets usually needs elevation; without it, use Save PCAP or just Build.",
         ),
         (
             "Safety",

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
@@ -125,7 +126,7 @@ class PacketBuilderTab(QWidget):
             default_sizes=[260, 420, 520],
         )
         root.addWidget(splitter, 1)
-        splitter.addWidget(self._left_panel())
+        splitter.addWidget(self._scroll(self._left_panel()))
         splitter.addWidget(self._editor_panel())
         splitter.addWidget(self._preview_panel())
         splitter.restore()
@@ -133,6 +134,15 @@ class PacketBuilderTab(QWidget):
         self._refresh_presets()
         self._rebuild_layer_forms()
         self._refresh_preview()
+
+    def _scroll(self, widget: QWidget) -> QScrollArea:
+        """Wrap a tall panel so its controls stay reachable on short windows."""
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        area.setWidget(widget)
+        return area
 
     def _left_panel(self) -> QWidget:
         panel = QWidget()
@@ -196,12 +206,30 @@ class PacketBuilderTab(QWidget):
         self.layer_area.setWidget(self.layer_container)
         layout.addWidget(self.layer_area, 1)
 
-        actions = QHBoxLayout()
+        hint = QLabel(
+            "Build previews the packet. Send transmits it using the Transmission "
+            "settings on the left (interface, count, Layer 3/2). Send and Wait uses sr/sr1."
+        )
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        # Two rows: primary build/send actions on top, file/preset actions below,
+        # so wide labels do not overflow a narrow panel and get clipped.
+        primary = QHBoxLayout()
         for text, callback in [
             ("Build", self._refresh_preview),
             ("Send", self.send_once),
             ("Send and Wait", self.send_and_wait),
             ("Send Multiple", self.send_multiple),
+        ]:
+            button = QPushButton(text)
+            button.clicked.connect(callback)
+            primary.addWidget(button)
+        layout.addLayout(primary)
+
+        secondary = QHBoxLayout()
+        for text, callback in [
             ("Save PCAP", self.save_pcap),
             ("Load PCAP", self.load_pcap),
             ("Save Preset", self.save_current_preset),
@@ -210,8 +238,8 @@ class PacketBuilderTab(QWidget):
         ]:
             button = QPushButton(text)
             button.clicked.connect(callback)
-            actions.addWidget(button)
-        layout.addLayout(actions)
+            secondary.addWidget(button)
+        layout.addLayout(secondary)
         return panel
 
     def _preview_panel(self) -> QWidget:

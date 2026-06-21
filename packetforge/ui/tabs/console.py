@@ -70,12 +70,21 @@ class SafeConsoleTab(QWidget):
             'IP(dst="192.168.1.1", ttl=64) / ICMP() / Raw(load=b"PacketForge")'
         )
         self.expression.setFont(QFont("Menlo", 12))
+        self.expression.setMinimumHeight(120)
         layout.addWidget(self.expression, 1)
 
         self.error_label = QLabel()
         self.error_label.setObjectName("Error")
         self.error_label.setWordWrap(True)
         layout.addWidget(self.error_label)
+
+        hint = QLabel(
+            "Validate checks syntax · Build renders the packet · Send transmits it "
+            "(using the Transmission settings on the right). Send and Wait uses sr/sr1."
+        )
+        hint.setObjectName("Muted")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
 
         actions = QHBoxLayout()
         for text, callback in [
